@@ -39,7 +39,7 @@ export default function App() {
             onHistory={() => setTab('progress')}
           />
         ) : (
-          <WeekView onOpenWorkout={(id) => setOpenWorkoutId(id)} />
+          <WeekView onOpenWorkout={(id) => setOpenWorkoutId(id)} onOpenSettings={() => setTab('settings')} />
         ))}
       {tab === 'progress' && <ProgressView />}
       {tab === 'settings' && <SettingsView />}

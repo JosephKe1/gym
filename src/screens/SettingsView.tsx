@@ -1,11 +1,20 @@
-import { useRef, useState } from 'react'
-import { Download, Upload, RotateCcw } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Download, Upload, RotateCcw, ShieldCheck, Shield } from 'lucide-react'
 import { actions, getState, useAppState } from '../lib/store'
+import { EQUIPMENT_TYPES } from '../data/catalog'
 
 export default function SettingsView() {
-  const { settings } = useAppState()
+  const { settings, lastBackupAt } = useAppState()
   const fileRef = useRef<HTMLInputElement>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [persisted, setPersisted] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    navigator.storage
+      ?.persisted?.()
+      .then(setPersisted)
+      .catch(() => setPersisted(null))
+  }, [])
 
   const exportData = () => {
     const blob = new Blob([JSON.stringify(getState(), null, 2)], { type: 'application/json' })
@@ -15,6 +24,7 @@ export default function SettingsView() {
     a.download = `gym-backup-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(url)
+    actions.markBackup()
   }
 
   const importData = (file: File) => {
@@ -75,12 +85,75 @@ export default function SettingsView() {
         </div>
       </section>
 
+      <section className="mt-6 bg-white border border-slate-200 rounded-3xl p-5">
+        <h2 className="font-bold text-lg">My equipment</h2>
+        <p className="text-slate-500 text-sm mt-1">
+          Pick what you have access to. The exercise picker can then narrow its results to matching exercises
+          (bodyweight moves are always included).
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {EQUIPMENT_TYPES.map(({ key, label }) => {
+            const on = settings.equipment.includes(key)
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => actions.toggleEquipment(key)}
+                className={`px-4 py-2 rounded-full text-sm font-semibold border-2 ${
+                  on ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500'
+                }`}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+        <label className="flex items-center justify-between mt-5 pt-4 border-t border-slate-100">
+          <span className="font-medium">Filter picker by my equipment</span>
+          <input
+            type="checkbox"
+            checked={settings.filterByEquipment}
+            onChange={(e) => actions.setFilterByEquipment(e.target.checked)}
+            disabled={settings.equipment.length === 0}
+            className="w-6 h-6 accent-blue-600"
+          />
+        </label>
+        {settings.equipment.length === 0 && (
+          <p className="text-slate-400 text-xs mt-2">Select at least one equipment type to enable filtering.</p>
+        )}
+      </section>
+
       <section className="mt-6 bg-white border border-slate-200 rounded-3xl p-5 space-y-3">
         <h2 className="font-bold text-lg">Your data</h2>
         <p className="text-slate-500 text-sm">
-          Everything is stored locally in this browser. Export a backup before switching devices or clearing browser
-          data.
+          Everything is stored in this browser (two copies: localStorage plus an IndexedDB mirror that auto-restores if
+          one is cleared). For real safety, export a backup file now and then — especially before clearing browser data
+          or switching devices.
         </p>
+
+        <div className="flex items-center gap-2 text-sm">
+          {persisted ? (
+            <>
+              <ShieldCheck size={16} className="text-green-600" />
+              <span className="text-green-700">Browser granted persistent storage — data won't be auto-evicted.</span>
+            </>
+          ) : (
+            <>
+              <Shield size={16} className="text-slate-400" />
+              <span className="text-slate-500">
+                Persistent storage not confirmed by this browser — exports are your safety net.
+              </span>
+            </>
+          )}
+        </div>
+
+        <p className="text-sm text-slate-500">
+          Last backup:{' '}
+          <span className="font-semibold text-slate-700">
+            {lastBackupAt ? new Date(lastBackupAt).toLocaleDateString() : 'never'}
+          </span>
+        </p>
+
         <button
           type="button"
           onClick={exportData}
@@ -109,7 +182,7 @@ export default function SettingsView() {
         <button
           type="button"
           onClick={() => {
-            if (confirm('Reset the app? This deletes your plan edits and all workout history.')) {
+            if (confirm('Reset the app? This deletes your programs and all workout history.')) {
               actions.resetAll()
               setMessage('App reset to the starter plan.')
             }

@@ -130,7 +130,7 @@ function ExerciseChart({
         onPointerLeave={() => setActive(null)}
       >
         {/* recessive grid: min & max only */}
-        {[min, max].map((v) => (
+        {[...new Set([min, max])].map((v) => (
           <g key={v}>
             <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="#e2e8f0" strokeWidth="1" />
             <text x={PAD.l - 6} y={y(v) + 4} textAnchor="end" fontSize="10" fill="#94a3b8">

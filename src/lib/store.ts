@@ -4,7 +4,7 @@ import { seedPlan } from '../data/seed'
 import { getExercise, isTimed, isWeighted } from '../data/catalog'
 
 const STORAGE_KEY = 'gym-app-state-v1'
-const STATE_VERSION = 1
+const STATE_VERSION = 2
 
 // ---------- helpers ----------
 
@@ -25,11 +25,11 @@ export function weekdayIndex(d: Date = new Date()): number {
   return (d.getDay() + 6) % 7
 }
 
-/** Dates (YYYY-MM-DD) of the current week, Monday first. */
-export function currentWeekDates(): string[] {
+/** Dates (YYYY-MM-DD) of a week, Monday first. offset 0 = this week, -1 = last week, +1 = next. */
+export function weekDates(offset = 0): string[] {
   const now = new Date()
   const monday = new Date(now)
-  monday.setDate(now.getDate() - weekdayIndex(now))
+  monday.setDate(now.getDate() - weekdayIndex(now) + offset * 7)
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday)
     d.setDate(monday.getDate() + i)
@@ -37,25 +37,87 @@ export function currentWeekDates(): string[] {
   })
 }
 
+/** Human-readable range like "Jul 6 – Jul 12" for a week offset. */
+export function weekRangeLabel(offset = 0): string {
+  const dates = weekDates(offset)
+  const fmt = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number)
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  }
+  return `${fmt(dates[0])} – ${fmt(dates[6])}`
+}
+
 // ---------- state container ----------
 
+function defaultSettings(): AppState['settings'] {
+  return { unit: 'lb', restSec: 90, equipment: [], filterByEquipment: false }
+}
+
 function defaultState(): AppState {
+  const plan = seedPlan()
   return {
     version: STATE_VERSION,
-    plan: seedPlan(),
+    plans: [plan],
+    activePlanId: plan.id,
     sessions: [],
     activeSession: null,
-    settings: { unit: 'lb', restSec: 90 },
+    settings: defaultSettings(),
+    lastBackupAt: null,
   }
+}
+
+/**
+ * Upgrade any previously stored shape to the current version.
+ * Never discards user data — unknown/corrupt input returns null instead.
+ */
+function migrate(parsed: unknown): AppState | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const p = parsed as Record<string, unknown>
+
+  // v1: single `plan` object
+  if (p.version === 1 && p.plan && typeof p.plan === 'object') {
+    const oldPlan = p.plan as Omit<Plan, 'id' | 'createdAt'> & Partial<Plan>
+    const plan: Plan = {
+      id: oldPlan.id ?? uid(),
+      name: oldPlan.name ?? 'My Program',
+      subtitle: oldPlan.subtitle ?? 'Custom Program',
+      createdAt: oldPlan.createdAt ?? Date.now(),
+      workouts: oldPlan.workouts ?? [],
+      schedule: oldPlan.schedule ?? [null, null, null, null, null, null, null],
+    }
+    return {
+      version: STATE_VERSION,
+      plans: [plan],
+      activePlanId: plan.id,
+      sessions: Array.isArray(p.sessions) ? (p.sessions as Session[]) : [],
+      activeSession: (p.activeSession as Session | null) ?? null,
+      settings: { ...defaultSettings(), ...(p.settings as object | undefined) },
+      lastBackupAt: null,
+    }
+  }
+
+  if (p.version === STATE_VERSION && Array.isArray(p.plans) && (p.plans as Plan[]).length > 0) {
+    const plans = p.plans as Plan[]
+    const activePlanId = plans.some((x) => x.id === p.activePlanId) ? (p.activePlanId as string) : plans[0].id
+    return {
+      version: STATE_VERSION,
+      plans,
+      activePlanId,
+      sessions: Array.isArray(p.sessions) ? (p.sessions as Session[]) : [],
+      activeSession: (p.activeSession as Session | null) ?? null,
+      settings: { ...defaultSettings(), ...(p.settings as object | undefined) },
+      lastBackupAt: typeof p.lastBackupAt === 'number' ? p.lastBackupAt : null,
+    }
+  }
+
+  return null
 }
 
 function loadState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return defaultState()
-    const parsed = JSON.parse(raw) as AppState
-    if (!parsed || parsed.version !== STATE_VERSION) return defaultState()
-    return { ...defaultState(), ...parsed }
+    return migrate(JSON.parse(raw)) ?? defaultState()
   } catch {
     return defaultState()
   }
@@ -65,11 +127,13 @@ let state: AppState = loadState()
 const listeners = new Set<() => void>()
 
 function persist() {
+  const json = JSON.stringify(state)
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    localStorage.setItem(STORAGE_KEY, json)
   } catch {
     // storage full or unavailable — keep running in memory
   }
+  idbWrite(json)
 }
 
 function setState(updater: (s: AppState) => AppState) {
@@ -92,10 +156,79 @@ export function getState(): AppState {
   return state
 }
 
+export function activePlan(s: AppState): Plan {
+  return s.plans.find((p) => p.id === s.activePlanId) ?? s.plans[0]
+}
+
+// ---------- IndexedDB mirror (second copy of the same state) ----------
+
+const IDB_NAME = 'gym-app-backup'
+const IDB_STORE = 'state'
+
+function idbOpen(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1)
+    req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE)
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error)
+  })
+}
+
+let idbTimer: ReturnType<typeof setTimeout> | null = null
+function idbWrite(json: string) {
+  // throttle: at most one IDB write per 2s burst of updates
+  if (idbTimer) clearTimeout(idbTimer)
+  idbTimer = setTimeout(async () => {
+    try {
+      const db = await idbOpen()
+      db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(json, STORAGE_KEY)
+    } catch {
+      // IndexedDB unavailable — localStorage remains the primary copy
+    }
+  }, 2000)
+}
+
+async function idbRead(): Promise<string | null> {
+  try {
+    const db = await idbOpen()
+    return await new Promise((resolve) => {
+      const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(STORAGE_KEY)
+      req.onsuccess = () => resolve((req.result as string | undefined) ?? null)
+      req.onerror = () => resolve(null)
+    })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Run once at startup: ask the browser not to evict our storage, and if
+ * localStorage was wiped but the IndexedDB mirror survived, restore from it.
+ */
+export async function bootstrapStore(): Promise<void> {
+  try {
+    await navigator.storage?.persist?.()
+  } catch {
+    // not supported — fine
+  }
+  if (localStorage.getItem(STORAGE_KEY)) return
+  const mirrored = await idbRead()
+  if (!mirrored) return
+  try {
+    const restored = migrate(JSON.parse(mirrored))
+    if (restored) setState(() => restored)
+  } catch {
+    // corrupt mirror — ignore
+  }
+}
+
 // ---------- plan actions ----------
 
 function updatePlan(fn: (p: Plan) => Plan) {
-  setState((s) => ({ ...s, plan: fn(s.plan) }))
+  setState((s) => ({
+    ...s,
+    plans: s.plans.map((p) => (p.id === s.activePlanId ? fn(p) : p)),
+  }))
 }
 
 function updateWorkout(workoutId: string, fn: (w: Workout) => Workout) {
@@ -109,6 +242,42 @@ export const actions = {
   renamePlan(name: string) {
     updatePlan((p) => ({ ...p, name }))
   },
+
+  // ---------- program management ----------
+
+  /** Create an empty program: one blank workout per selected day (Mon-first indexes). Returns its id. */
+  createPlan(name: string, days: number[]): string {
+    const id = uid()
+    const schedule: (string | null)[] = [null, null, null, null, null, null, null]
+    const workouts: Workout[] = []
+    const sorted = [...days].sort((a, b) => a - b)
+    sorted.forEach((day, i) => {
+      const wid = uid()
+      workouts.push({ id: wid, name: `Workout ${i + 1}`, exercises: [] })
+      schedule[day] = wid
+    })
+    const plan: Plan = { id, name, subtitle: 'Custom Program', createdAt: Date.now(), workouts, schedule }
+    setState((s) => ({ ...s, plans: [...s.plans, plan], activePlanId: id }))
+    return id
+  },
+
+  setActivePlan(planId: string) {
+    setState((s) => (s.plans.some((p) => p.id === planId) ? { ...s, activePlanId: planId } : s))
+  },
+
+  renamePlanById(planId: string, name: string) {
+    setState((s) => ({ ...s, plans: s.plans.map((p) => (p.id === planId ? { ...p, name } : p)) }))
+  },
+
+  deletePlan(planId: string) {
+    setState((s) => {
+      if (s.plans.length <= 1) return s
+      const plans = s.plans.filter((p) => p.id !== planId)
+      return { ...s, plans, activePlanId: s.activePlanId === planId ? plans[0].id : s.activePlanId }
+    })
+  },
+
+  // ---------- workout editing (active program) ----------
 
   renameWorkout(workoutId: string, name: string) {
     updateWorkout(workoutId, (w) => ({ ...w, name }))
@@ -202,7 +371,7 @@ export const actions = {
   // ---------- session actions ----------
 
   startSession(workoutId: string) {
-    const workout = state.plan.workouts.find((w) => w.id === workoutId)
+    const workout = activePlan(state).workouts.find((w) => w.id === workoutId)
     if (!workout) return
     const logs: ExerciseLog[] = workout.exercises.map((e) => ({
       slotId: e.id,
@@ -284,11 +453,27 @@ export const actions = {
     setState((s) => ({ ...s, settings: { ...s.settings, restSec } }))
   },
 
+  toggleEquipment(key: string) {
+    setState((s) => {
+      const has = s.settings.equipment.includes(key)
+      const equipment = has ? s.settings.equipment.filter((e) => e !== key) : [...s.settings.equipment, key]
+      return { ...s, settings: { ...s.settings, equipment } }
+    })
+  },
+
+  setFilterByEquipment(on: boolean) {
+    setState((s) => ({ ...s, settings: { ...s.settings, filterByEquipment: on } }))
+  },
+
+  markBackup() {
+    setState((s) => ({ ...s, lastBackupAt: Date.now() }))
+  },
+
   importState(json: string): boolean {
     try {
-      const parsed = JSON.parse(json) as AppState
-      if (!parsed || parsed.version !== STATE_VERSION || !parsed.plan || !Array.isArray(parsed.sessions)) return false
-      setState(() => ({ ...defaultState(), ...parsed }))
+      const restored = migrate(JSON.parse(json))
+      if (!restored) return false
+      setState(() => restored)
       return true
     } catch {
       return false
@@ -308,22 +493,20 @@ function emptySet(): SetLog {
 
 export type DayStatus = 'rest' | 'upcoming' | 'today' | 'complete' | 'missed'
 
-export function dayStatus(dayIndex: number): DayStatus {
-  const workoutId = state.plan.schedule[dayIndex]
-  return dayStatusFor(state, dayIndex, workoutId)
-}
-
-export function dayStatusFor(s: AppState, dayIndex: number, workoutId: string | null): DayStatus {
-  if (!workoutId) return 'rest'
-  const dates = currentWeekDates()
-  const date = dates[dayIndex]
+export function dayStatusFor(s: AppState, date: string, workoutId: string | null): DayStatus {
   // any finished session that day counts — training off-schedule still marks the day complete
   const done = s.sessions.some((sess) => sess.date === date && sess.finishedAt !== null)
+  const today = localDate()
+  if (!workoutId) return done && date <= today ? 'complete' : 'rest'
   if (done) return 'complete'
-  const today = weekdayIndex()
-  if (dayIndex < today) return 'missed'
-  if (dayIndex === today) return 'today'
+  if (date < today) return 'missed'
+  if (date === today) return 'today'
   return 'upcoming'
+}
+
+/** Finished sessions on a given date (for showing what was actually done on past days). */
+export function sessionsOn(s: AppState, date: string): Session[] {
+  return s.sessions.filter((sess) => sess.date === date && sess.finishedAt !== null)
 }
 
 export interface LastPerformance {

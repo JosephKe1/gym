@@ -4,6 +4,7 @@ import Sheet from './Sheet'
 import ExerciseImage from './ExerciseImage'
 import { searchCatalog } from '../data/catalog'
 import { MUSCLE_GROUPS, GROUP_BADGE, type MuscleGroup } from '../lib/muscles'
+import { actions, useAppState } from '../lib/store'
 import type { CatalogExercise } from '../types'
 
 interface ExercisePickerProps {
@@ -16,14 +17,17 @@ interface ExercisePickerProps {
 type Tab = 'all' | 'muscle'
 
 export default function ExercisePicker({ title = 'Select Exercise', onSelect, onInfo, onClose }: ExercisePickerProps) {
+  const { settings } = useAppState()
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<Tab>('all')
   const [group, setGroup] = useState<MuscleGroup | null>(null)
 
+  const equipmentFilterOn = settings.filterByEquipment && settings.equipment.length > 0
   const results = useMemo(() => {
     if (tab === 'muscle' && !group && !query.trim()) return []
-    return searchCatalog(query, tab === 'muscle' ? group : null).slice(0, 200)
-  }, [query, tab, group])
+    const equipment = equipmentFilterOn ? [...settings.equipment, 'body only'] : null
+    return searchCatalog(query, tab === 'muscle' ? group : null, equipment).slice(0, 200)
+  }, [query, tab, group, equipmentFilterOn, settings.equipment])
 
   const showMuscleList = tab === 'muscle' && !group && !query.trim()
 
@@ -66,6 +70,18 @@ export default function ExercisePicker({ title = 'Select Exercise', onSelect, on
             </button>
           ))}
         </div>
+
+        {settings.equipment.length > 0 && (
+          <label className="mt-3 flex items-center justify-between px-1">
+            <span className="text-sm text-slate-500">Only equipment I have</span>
+            <input
+              type="checkbox"
+              checked={settings.filterByEquipment}
+              onChange={(e) => actions.setFilterByEquipment(e.target.checked)}
+              className="w-5 h-5 accent-blue-600"
+            />
+          </label>
+        )}
       </div>
 
       <div className="overflow-y-auto px-5 pb-8 grow">

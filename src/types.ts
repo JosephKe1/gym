@@ -36,8 +36,10 @@ export interface Workout {
 }
 
 export interface Plan {
+  id: string
   name: string
   subtitle: string
+  createdAt: number
   workouts: Workout[]
   /** Monday-first: schedule[0] = Mon ... schedule[6] = Sun. Value is a workout id or null (rest). */
   schedule: (string | null)[]
@@ -83,12 +85,19 @@ export interface Session {
 export interface Settings {
   unit: 'lb' | 'kg'
   restSec: number
+  /** Equipment the user has access to (catalog equipment keys). Empty = everything. */
+  equipment: string[]
+  /** Whether the exercise picker narrows to owned equipment by default. */
+  filterByEquipment: boolean
 }
 
 export interface AppState {
   version: number
-  plan: Plan
+  plans: Plan[]
+  activePlanId: string
   sessions: Session[]
   activeSession: Session | null
   settings: Settings
+  /** Timestamp of the last JSON backup export, for reminder nudges. */
+  lastBackupAt: number | null
 }

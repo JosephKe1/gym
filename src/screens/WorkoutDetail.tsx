@@ -19,7 +19,7 @@ import ExerciseImage from '../components/ExerciseImage'
 import ExerciseInfoSheet from '../components/ExerciseInfoSheet'
 import { getExercise } from '../data/catalog'
 import { toGroup, GROUP_BADGE, type MuscleGroup } from '../lib/muscles'
-import { actions, useAppState } from '../lib/store'
+import { actions, activePlan, useAppState } from '../lib/store'
 import type { CatalogExercise, PlanExercise, Workout } from '../types'
 
 interface WorkoutDetailProps {
@@ -32,7 +32,8 @@ interface WorkoutDetailProps {
 type PickerMode = { kind: 'add' } | { kind: 'swap'; slotId: string } | null
 
 export default function WorkoutDetail({ workoutId, onBack, onStart, onHistory }: WorkoutDetailProps) {
-  const { plan } = useAppState()
+  const state = useAppState()
+  const plan = activePlan(state)
   const workout = plan.workouts.find((w) => w.id === workoutId)
   const [picker, setPicker] = useState<PickerMode>(null)
   const [editSlot, setEditSlot] = useState<PlanExercise | null>(null)

@@ -15,8 +15,10 @@ function pe(
 /** A 5-day Upper / Lower / Push / Pull / Legs split to start from. Fully editable in the app. */
 export function seedPlan(): Plan {
   return {
+    id: 'plan-seed',
     name: 'Intermediate: 5-Day ULPPL Plan',
     subtitle: 'Intermediate · Build Muscle',
+    createdAt: Date.now(),
     workouts: [
       {
         id: 'w-upper',
