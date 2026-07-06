@@ -23,6 +23,8 @@ export interface CustomExercise extends CatalogExercise {
   defaultSets: number
   defaultRepsMin: number
   defaultRepsMax: number
+  /** Default rest between sets, seconds. null = global default. */
+  defaultRestSec?: number | null
   /** Soft-deleted: hidden from the picker but still resolvable for history. */
   deleted?: boolean
 }

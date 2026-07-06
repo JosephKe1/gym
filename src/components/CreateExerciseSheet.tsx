@@ -38,6 +38,7 @@ export default function CreateExerciseSheet({ initialName = '', onCreated, onClo
   const [secondary, setSecondary] = useState<MuscleGroup[]>([])
   const [sets, setSets] = useState(3)
   const [repRange, setRepRange] = useState('8-12')
+  const [restSec, setRestSec] = useState<number | null>(null)
   const [pickingEquipment, setPickingEquipment] = useState(false)
 
   const canSave = name.trim().length > 0 && equipmentKey !== null && trackType !== null && primary !== null
@@ -170,6 +171,22 @@ export default function CreateExerciseSheet({ initialName = '', onCreated, onClo
           </select>
         </div>
 
+        <div className="mt-4 flex items-center justify-between">
+          <span className="text-lg font-medium">Rest timer</span>
+          <select
+            value={restSec === null ? 'default' : String(restSec)}
+            onChange={(e) => setRestSec(e.target.value === 'default' ? null : Number(e.target.value))}
+            className="bg-slate-100 rounded-xl px-4 py-2.5 text-lg font-semibold outline-none"
+          >
+            <option value="default">App default</option>
+            {Array.from({ length: 24 }, (_, i) => 15 + i * 15).map((s) => (
+              <option key={s} value={s}>
+                {Math.floor(s / 60)}:{String(s % 60).padStart(2, '0')}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <button
           type="button"
           disabled={!canSave}
@@ -184,6 +201,7 @@ export default function CreateExerciseSheet({ initialName = '', onCreated, onClo
               defaultSets: sets,
               defaultRepsMin: lo,
               defaultRepsMax: hi,
+              defaultRestSec: restSec,
             })
             onCreated(ex)
           }}

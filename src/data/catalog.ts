@@ -41,10 +41,19 @@ export function imageUrl(ex: CatalogExercise): string | null {
   return ex.image ? IMAGE_BASE + ex.image : null
 }
 
+// static holds miscategorized as strength in the catalog — logged by time, not reps
+const TIMED_HOLDS = new Set([
+  'Plank',
+  'Isometric_Chest_Squeezes',
+  'Isometric_Neck_Exercise_-_Front_And_Back',
+  'Isometric_Neck_Exercise_-_Sides',
+  'Isometric_Wipers',
+])
+
 /** True for exercises logged by time (seconds) rather than reps. */
 export function isTimed(ex: CatalogExercise): boolean {
   if (isCustom(ex)) return ex.trackType === 'duration'
-  return ex.category === 'cardio' || ex.category === 'stretching'
+  return ex.category === 'cardio' || ex.category === 'stretching' || TIMED_HOLDS.has(ex.id)
 }
 
 /** True for exercises where logging a weight makes sense. */

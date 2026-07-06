@@ -4,6 +4,7 @@ import { seedPlan } from '../data/seed'
 import { getExercise, isTimed, isWeighted, setCustomExercises } from '../data/catalog'
 import { migrateCoarseEquipment } from '../data/equipment'
 import { GROUP_TO_RAW, type MuscleGroup } from './muscles'
+import { suggestSets } from './suggest'
 
 const STORAGE_KEY = 'gym-app-state-v1'
 const STATE_VERSION = 3
@@ -322,13 +323,15 @@ export const actions = {
 
   addExercise(workoutId: string, exerciseId: string, sets = 3, repsMin = 8, repsMax = 12) {
     const ex = getExercise(exerciseId)
+    let restSec: number | null = null
     if (ex && 'defaultSets' in ex) {
       const c = ex as CustomExercise
       sets = c.defaultSets
       repsMin = c.defaultRepsMin
       repsMax = c.defaultRepsMax
+      restSec = c.defaultRestSec ?? null
     }
-    const slot: PlanExercise = { id: uid(), exerciseId, sets, repsMin, repsMax, perSide: false, supersetWith: null, restSec: null }
+    const slot: PlanExercise = { id: uid(), exerciseId, sets, repsMin, repsMax, perSide: false, supersetWith: null, restSec }
     updateWorkout(workoutId, (w) => ({ ...w, exercises: [...w.exercises, slot] }))
   },
 
@@ -395,17 +398,21 @@ export const actions = {
   startSession(workoutId: string) {
     const workout = activePlan(state).workouts.find((w) => w.id === workoutId)
     if (!workout) return
-    const logs: ExerciseLog[] = workout.exercises.map((e) => ({
-      slotId: e.id,
-      exerciseId: e.exerciseId,
-      perSide: e.perSide ?? false,
-      targetSets: e.sets,
-      repsMin: e.repsMin,
-      repsMax: e.repsMax,
-      supersetWith: e.supersetWith ?? null,
-      restSec: e.restSec ?? null,
-      sets: Array.from({ length: e.sets }, () => emptySet()),
-    }))
+    const logs: ExerciseLog[] = workout.exercises.map((e) => {
+      // pre-fill each set with last session's numbers so the user only adjusts
+      const suggestions = suggestSets(logMode(e.exerciseId), e.sets, e.repsMax, lastPerformance(state, e.exerciseId))
+      return {
+        slotId: e.id,
+        exerciseId: e.exerciseId,
+        perSide: e.perSide ?? false,
+        targetSets: e.sets,
+        repsMin: e.repsMin,
+        repsMax: e.repsMax,
+        supersetWith: e.supersetWith ?? null,
+        restSec: e.restSec ?? null,
+        sets: suggestions.map((s) => ({ ...emptySet(), weight: s.weight, reps: s.reps })),
+      }
+    })
     const session: Session = {
       id: uid(),
       workoutId,
@@ -450,6 +457,25 @@ export const actions = {
     })
   },
 
+  /** Save a rest time from inside a session: updates the running log AND the plan slot for next time. */
+  saveSessionRest(logIndex: number, restSec: number | null) {
+    setState((s) => {
+      if (!s.activeSession) return s
+      const log = s.activeSession.logs[logIndex]
+      if (!log) return s
+      const logs = s.activeSession.logs.map((l, i) => (i === logIndex ? { ...l, restSec } : l))
+      const plans = s.plans.map((p) => ({
+        ...p,
+        workouts: p.workouts.map((w) =>
+          w.id === s.activeSession!.workoutId
+            ? { ...w, exercises: w.exercises.map((e) => (e.id === log.slotId ? { ...e, restSec } : e)) }
+            : w,
+        ),
+      }))
+      return { ...s, plans, activeSession: { ...s.activeSession, logs } }
+    })
+  },
+
   finishSession() {
     setState((s) => {
       if (!s.activeSession) return s
@@ -477,6 +503,7 @@ export const actions = {
     defaultSets: number
     defaultRepsMin: number
     defaultRepsMax: number
+    defaultRestSec: number | null
   }): CustomExercise {
     const ex: CustomExercise = {
       id: `custom-${uid()}`,
@@ -494,6 +521,7 @@ export const actions = {
       defaultSets: input.defaultSets,
       defaultRepsMin: input.defaultRepsMin,
       defaultRepsMax: input.defaultRepsMax,
+      defaultRestSec: input.defaultRestSec,
     }
     setState((s) => ({ ...s, customExercises: [...s.customExercises, ex] }))
     return ex

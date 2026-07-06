@@ -28,10 +28,13 @@ const OPTIONS: { effort: Effort; label: string; hint: string; card: string; dot:
 interface EffortModalProps {
   onPick: (effort: Effort) => void
   onClose: () => void
+  /** Shown when re-rating an already-completed set. */
+  allowUncheck?: boolean
+  onUncheck?: () => void
 }
 
 /** Centered "Rate Effort Level" dialog shown when completing a set. */
-export default function EffortModal({ onPick, onClose }: EffortModalProps) {
+export default function EffortModal({ onPick, onClose, allowUncheck = false, onUncheck }: EffortModalProps) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-5">
       <div className="absolute inset-0 bg-black/40 animate-fade-in" onClick={onClose} />
@@ -63,9 +66,19 @@ export default function EffortModal({ onPick, onClose }: EffortModalProps) {
           ))}
         </div>
 
+        {allowUncheck && onUncheck && (
+          <button
+            type="button"
+            onClick={onUncheck}
+            className="mt-3 w-full py-3 rounded-2xl bg-slate-100 text-slate-600 font-semibold active:bg-slate-200"
+          >
+            Mark set incomplete
+          </button>
+        )}
+
         <div className="mt-5 pt-4 border-t border-slate-100 flex items-start gap-3 text-slate-500 text-sm">
           <TrendingUp size={20} className="text-blue-500 shrink-0" />
-          <span>Your effort ratings show up in your history and help you judge when it's time to add weight.</span>
+          <span>Your effort ratings drive next session's suggestions and help you judge when to add weight.</span>
         </div>
       </div>
     </div>

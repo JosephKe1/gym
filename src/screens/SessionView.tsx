@@ -1,17 +1,24 @@
-import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Link2, Minus, Plus, Timer, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronsDown, ChevronsUp, Link2, Minus, Pause, Play, Plus, Timer, X } from 'lucide-react'
 import Menu from '../components/Menu'
 import ExerciseImage from '../components/ExerciseImage'
 import ExerciseInfoSheet from '../components/ExerciseInfoSheet'
 import EffortModal from '../components/EffortModal'
+import Sheet from '../components/Sheet'
 import { getExercise } from '../data/catalog'
-import { actions, lastPerformance, logMode, useAppState, EFFORT_LABEL } from '../lib/store'
+import { actions, lastPerformance, logMode, useAppState } from '../lib/store'
+import { suggestSets, type SetSuggestion } from '../lib/suggest'
 import type { CatalogExercise, Effort, ExerciseLog, SetLog } from '../types'
 
-const EFFORT_STYLE: Record<Effort, string> = {
-  easy: 'bg-teal-100 text-teal-700 border-teal-300',
-  ideal: 'bg-amber-100 text-amber-700 border-amber-300',
-  max: 'bg-red-100 text-red-700 border-red-300',
+const EFFORT_CIRCLE: Record<Effort, string> = {
+  easy: 'bg-teal-500 border-teal-500',
+  ideal: 'bg-amber-400 border-amber-400',
+  max: 'bg-red-500 border-red-500',
+}
+const EFFORT_DOT: Record<Effort, string> = {
+  easy: 'bg-teal-500',
+  ideal: 'bg-amber-400',
+  max: 'bg-red-500',
 }
 
 interface RatingTarget {
@@ -22,6 +29,13 @@ interface RatingTarget {
   wasDone: boolean
 }
 
+interface Stopwatch {
+  logIndex: number
+  setIndex: number
+  startedAt: number
+  baseSec: number
+}
+
 export default function SessionView({ onDone }: { onDone: () => void }) {
   const state = useAppState()
   const session = state.activeSession
@@ -30,12 +44,15 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
   const [infoExercise, setInfoExercise] = useState<CatalogExercise | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const [rating, setRating] = useState<RatingTarget | null>(null)
+  const [hint, setHint] = useState<{ title: string; body: string } | null>(null)
+  const [restPicker, setRestPicker] = useState<number | null>(null) // logIndex
+  const [watch, setWatch] = useState<Stopwatch | null>(null)
 
   useEffect(() => {
     const t = setInterval(() => {
       setNow(Date.now())
       if (session) setElapsed(Math.floor((Date.now() - session.startedAt) / 1000))
-    }, 500)
+    }, 300)
     return () => clearInterval(t)
   }, [session])
 
@@ -64,8 +81,24 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
     setRest({ endsAt: Date.now() + total * 1000, total })
   }
 
+  const stopWatch = (w: Stopwatch) => {
+    const total = w.baseSec + Math.round((Date.now() - w.startedAt) / 1000)
+    actions.updateSet(w.logIndex, w.setIndex, { timeSec: total })
+    setWatch(null)
+  }
+
+  const toggleWatch = (logIndex: number, setIndex: number, currentSec: number | null) => {
+    if (watch && watch.logIndex === logIndex && watch.setIndex === setIndex) {
+      stopWatch(watch)
+      return
+    }
+    if (watch) stopWatch(watch)
+    setWatch({ logIndex, setIndex, startedAt: Date.now(), baseSec: currentSec ?? 0 })
+  }
+
   const finish = () => {
     if (doneSets < totalSets && !confirm(`${totalSets - doneSets} sets are not logged yet. Finish anyway?`)) return
+    if (watch) stopWatch(watch)
     actions.finishSession()
     onDone()
   }
@@ -110,7 +143,13 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
             log={log}
             logIndex={li}
             unit={state.settings.unit}
+            defaultRestSec={state.settings.restSec}
+            watch={watch}
+            now={now}
+            onToggleWatch={toggleWatch}
             onRequestRating={setRating}
+            onHint={setHint}
+            onOpenRestPicker={() => setRestPicker(li)}
             onInfo={setInfoExercise}
           />
         ))}
@@ -140,10 +179,33 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
       {rating && (
         <EffortModal
           onClose={() => setRating(null)}
+          allowUncheck={rating.wasDone}
+          onUncheck={() => {
+            actions.updateSet(rating.logIndex, rating.setIndex, { done: false })
+            setRating(null)
+          }}
           onPick={(effort) => {
             actions.updateSet(rating.logIndex, rating.setIndex, { effort, done: true })
             if (!rating.wasDone) startRest(rating.restSec)
             setRating(null)
+          }}
+        />
+      )}
+
+      {hint && <HintModal title={hint.title} body={hint.body} onClose={() => setHint(null)} />}
+
+      {restPicker !== null && (
+        <RestPickerSheet
+          initialSec={session.logs[restPicker]?.restSec ?? state.settings.restSec}
+          onClose={() => setRestPicker(null)}
+          onSave={(sec) => {
+            actions.saveSessionRest(restPicker, sec)
+            setRestPicker(null)
+          }}
+          onStart={(sec) => {
+            actions.saveSessionRest(restPicker, sec)
+            startRest(sec)
+            setRestPicker(null)
           }}
         />
       )}
@@ -157,27 +219,44 @@ function ExerciseCard({
   log,
   logIndex,
   unit,
+  defaultRestSec,
+  watch,
+  now,
+  onToggleWatch,
   onRequestRating,
+  onHint,
+  onOpenRestPicker,
   onInfo,
 }: {
   log: ExerciseLog
   logIndex: number
   unit: string
+  defaultRestSec: number
+  watch: Stopwatch | null
+  now: number
+  onToggleWatch: (logIndex: number, setIndex: number, currentSec: number | null) => void
   onRequestRating: (target: RatingTarget) => void
+  onHint: (hint: { title: string; body: string }) => void
+  onOpenRestPicker: () => void
   onInfo: (ex: CatalogExercise) => void
 }) {
   const state = useAppState()
   const [collapsed, setCollapsed] = useState(false)
   const ex = getExercise(log.exerciseId)
+  const mode = logMode(log.exerciseId)
+
+  // suggestions are derived from the previous (finished) session — stable during this one
+  const suggestions = useMemo(
+    () => suggestSets(mode, Math.max(log.sets.length, log.targetSets), log.repsMax, lastPerformance(state, log.exerciseId)),
+    [state, log.exerciseId, log.sets.length, log.targetSets, log.repsMax, mode],
+  )
+
   if (!ex) return null
 
-  const mode = logMode(log.exerciseId)
-  const last = lastPerformance(state, log.exerciseId)
-  const partner = log.supersetWith
-    ? state.activeSession?.logs.find((l) => l.slotId === log.supersetWith)
-    : null
+  const partner = log.supersetWith ? state.activeSession?.logs.find((l) => l.slotId === log.supersetWith) : null
   const partnerEx = partner ? getExercise(partner.exerciseId) : null
   const allDone = log.sets.every((s) => s.done)
+  const restLabel = fmtClock(log.restSec ?? defaultRestSec)
 
   return (
     <section className={`rounded-3xl border p-4 ${allDone ? 'bg-green-50/50 border-green-200' : 'bg-white border-slate-200'}`}>
@@ -188,9 +267,7 @@ function ExerciseCard({
         <div className="grow min-w-0">
           <h3 className="font-bold text-lg leading-snug">{ex.name}</h3>
           <p className="text-slate-500 text-sm">
-            Target: {log.targetSets} × {log.repsMin}-{log.repsMax}
-            {log.perSide ? ' per side' : ''}
-            {log.restSec != null && ` · rest ${Math.floor(log.restSec / 60)}:${String(log.restSec % 60).padStart(2, '0')}`}
+            {mode === 'time' ? 'Timed sets' : `${log.repsMin}-${log.repsMax} reps${log.perSide ? ' per side' : ''}`}
           </p>
           {partnerEx && (
             <p className="text-purple-600 text-xs font-semibold mt-0.5 flex items-center gap-1">
@@ -210,27 +287,24 @@ function ExerciseCard({
 
       {!collapsed && (
         <>
-          {last && (
-            <p className="text-xs text-slate-400 mt-2">
-              Last time ({last.date}):{' '}
-              {last.sets
-                .map((s) => (mode === 'time' ? formatClock(s.timeSec ?? 0) : `${s.weight ?? '–'}${s.weight != null ? unit : ''}×${s.reps ?? '–'}`))
-                .join(', ')}
-            </p>
-          )}
-
-          <div className="mt-3 grid grid-cols-[2rem_1fr_1fr_4.5rem_2.75rem] gap-2 items-center text-center">
+          <div
+            className={`mt-3 grid gap-x-2 gap-y-2 items-center text-center ${
+              mode === 'time' ? 'grid-cols-[1.8rem_1fr_2.5rem_1fr_2.75rem]' : 'grid-cols-[1.8rem_1fr_1.15fr_1.15fr_2.75rem]'
+            }`}
+          >
             <span className="text-xs font-bold text-slate-400">SET</span>
+            <span className="text-xs font-bold text-slate-400">PREVIOUS</span>
             {mode === 'time' ? (
-              <span className="text-xs font-bold text-slate-400 col-span-2">TIME (SEC)</span>
+              <span className="text-xs font-bold text-slate-400 col-span-2">TIME</span>
             ) : (
               <>
-                <span className="text-xs font-bold text-slate-400">{mode === 'weight-reps' ? unit.toUpperCase() : ''}</span>
+                <span className="text-xs font-bold text-slate-400">
+                  {mode === 'weight-reps' ? unit.toUpperCase() : ''}
+                </span>
                 <span className="text-xs font-bold text-slate-400">REPS</span>
               </>
             )}
             <span className="text-xs font-bold text-slate-400">EFFORT</span>
-            <span />
 
             {log.sets.map((set, si) => (
               <SetRow
@@ -239,26 +313,39 @@ function ExerciseCard({
                 index={si}
                 logIndex={logIndex}
                 mode={mode}
+                suggestion={suggestions[si] ?? null}
+                watch={watch && watch.logIndex === logIndex && watch.setIndex === si ? watch : null}
+                now={now}
+                onToggleWatch={() => onToggleWatch(logIndex, si, set.timeSec)}
+                onHint={onHint}
                 onRate={(wasDone) => onRequestRating({ logIndex, setIndex: si, restSec: log.restSec, wasDone })}
               />
             ))}
           </div>
 
-          <div className="flex gap-2 mt-3">
+          <div className="flex gap-2 mt-4 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={onOpenRestPicker}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold text-sm active:bg-slate-200"
+            >
+              <Timer size={15} /> Rest: {restLabel}
+            </button>
             <button
               type="button"
               onClick={() => actions.addSet(logIndex)}
-              className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl bg-slate-100 text-slate-600 font-semibold text-sm active:bg-slate-200"
+              className="flex-1 flex items-center justify-center gap-1 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-semibold text-sm active:bg-slate-200"
             >
               <Plus size={15} /> Add set
             </button>
             {log.sets.length > 1 && (
               <button
                 type="button"
+                aria-label="Remove last set"
                 onClick={() => actions.removeLastSet(logIndex)}
-                className="flex-1 flex items-center justify-center gap-1 py-2 rounded-xl bg-slate-100 text-slate-600 font-semibold text-sm active:bg-slate-200"
+                className="w-11 flex items-center justify-center rounded-xl bg-slate-100 text-slate-600 active:bg-slate-200"
               >
-                <Minus size={15} /> Remove set
+                <Minus size={15} />
               </button>
             )}
           </div>
@@ -275,66 +362,211 @@ function SetRow({
   index,
   logIndex,
   mode,
+  suggestion,
+  watch,
+  now,
+  onToggleWatch,
+  onHint,
   onRate,
 }: {
   set: SetLog
   index: number
   logIndex: number
   mode: 'weight-reps' | 'reps' | 'time'
+  suggestion: SetSuggestion | null
+  watch: Stopwatch | null
+  now: number
+  onToggleWatch: () => void
+  onHint: (hint: { title: string; body: string }) => void
   onRate: (wasDone: boolean) => void
 }) {
-  const toggleDone = () => {
-    // completing a set requires an effort rating; unchecking clears done but keeps the rating
-    if (set.done) actions.updateSet(logIndex, index, { done: false })
-    else onRate(false)
-  }
+  const prev = suggestion?.prev ?? null
+  const prevLabel =
+    prev == null
+      ? '–'
+      : mode === 'time'
+        ? prev.timeSec != null
+          ? fmtClock(prev.timeSec)
+          : '–'
+        : mode === 'weight-reps'
+          ? prev.weight != null || prev.reps != null
+            ? `${prev.weight ?? '–'} × ${prev.reps ?? '–'}`
+            : '–'
+          : prev.reps != null
+            ? `${prev.reps} reps`
+            : '–'
 
-  const numInput = (field: 'weight' | 'reps' | 'timeSec', placeholder: string) => (
-    <input
-      type="number"
-      inputMode="decimal"
-      min={0}
-      placeholder={placeholder}
-      value={set[field] ?? ''}
-      onChange={(e) => actions.updateSet(logIndex, index, { [field]: e.target.value === '' ? null : Number(e.target.value) })}
-      className={`w-full text-center text-lg font-semibold rounded-xl py-2 outline-none focus:ring-2 focus:ring-blue-400 ${
-        set.done ? 'bg-green-100/60' : 'bg-slate-100'
-      }`}
-    />
+  const numInput = (field: 'weight' | 'reps', dir: 'up' | 'down' | null) => (
+    <div className="flex items-center gap-0.5 min-w-0">
+      <input
+        type="number"
+        inputMode="decimal"
+        min={0}
+        placeholder="–"
+        value={set[field] ?? ''}
+        onChange={(e) => actions.updateSet(logIndex, index, { [field]: e.target.value === '' ? null : Number(e.target.value) })}
+        className={`w-full min-w-0 text-center text-lg font-semibold rounded-xl py-2 outline-none focus:ring-2 focus:ring-blue-400 ${
+          set.done ? 'bg-green-100/60' : 'bg-slate-100'
+        }`}
+      />
+      {dir && suggestion?.title ? (
+        <button
+          type="button"
+          aria-label="Why this suggestion?"
+          onClick={() => onHint({ title: suggestion.title!, body: suggestion.body! })}
+          className="text-blue-600 shrink-0 animate-pulse"
+        >
+          {dir === 'up' ? <ChevronsUp size={17} /> : <ChevronsDown size={17} />}
+        </button>
+      ) : (
+        <span className="w-[17px] shrink-0" />
+      )}
+    </div>
   )
+
+  const running = watch !== null
+  const displaySec = running ? (watch!.baseSec + Math.round((now - watch!.startedAt) / 1000)) : set.timeSec
 
   return (
     <>
       <span className="font-bold text-slate-500">{index + 1}</span>
+
+      <span className="text-sm text-slate-400 flex items-center justify-center gap-1.5 min-w-0 truncate">
+        {prevLabel}
+        {prev?.effort && <span className={`w-2 h-2 rounded-full shrink-0 ${EFFORT_DOT[prev.effort]}`} />}
+      </span>
+
       {mode === 'time' ? (
-        <div className="col-span-2">{numInput('timeSec', 'sec')}</div>
+        <>
+          <button
+            type="button"
+            aria-label={running ? 'Stop timer' : 'Start timer'}
+            onClick={onToggleWatch}
+            className={`w-9 h-9 mx-auto rounded-full flex items-center justify-center ${
+              running ? 'bg-blue-600 text-white' : 'text-blue-600 border-2 border-blue-500'
+            }`}
+          >
+            {running ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
+          </button>
+          <input
+            type="text"
+            inputMode="numeric"
+            placeholder="0:00"
+            value={displaySec != null ? fmtClock(displaySec) : ''}
+            onChange={(e) => {
+              const parts = e.target.value.split(':').map((x) => Number(x))
+              const sec = parts.length === 2 ? parts[0] * 60 + (parts[1] || 0) : Number(e.target.value) || 0
+              actions.updateSet(logIndex, index, { timeSec: Number.isFinite(sec) ? sec : null })
+            }}
+            className={`w-full min-w-0 text-center text-lg font-semibold rounded-xl py-2 outline-none focus:ring-2 focus:ring-blue-400 tabular-nums ${
+              running ? 'bg-blue-50 text-blue-700' : set.done ? 'bg-green-100/60' : 'bg-slate-100'
+            }`}
+          />
+        </>
       ) : (
         <>
-          {mode === 'weight-reps' ? numInput('weight', '–') : <span className="text-slate-300">—</span>}
-          {numInput('reps', '–')}
+          {mode === 'weight-reps' ? numInput('weight', suggestion?.weightDir ?? null) : <span className="text-slate-300">—</span>}
+          {numInput('reps', suggestion?.repsDir ?? null)}
         </>
       )}
+
       <button
         type="button"
-        aria-label="Rate effort"
+        aria-label={set.done ? 'Effort rating (tap to change)' : 'Complete set'}
         onClick={() => onRate(set.done)}
-        className={`text-xs font-bold rounded-full py-2 border ${
-          set.effort ? EFFORT_STYLE[set.effort] : 'bg-slate-50 text-slate-400 border-slate-200'
-        }`}
-      >
-        {set.effort ? EFFORT_LABEL[set.effort] : '– – –'}
-      </button>
-      <button
-        type="button"
-        aria-label={set.done ? 'Mark set incomplete' : 'Mark set complete'}
-        onClick={toggleDone}
-        className={`w-10 h-10 mx-auto rounded-xl flex items-center justify-center border-2 transition-colors ${
-          set.done ? 'bg-green-500 border-green-500 text-white' : 'border-slate-300 text-transparent'
+        className={`w-10 h-10 mx-auto rounded-full flex items-center justify-center border-[2.5px] transition-colors ${
+          set.done && set.effort ? `${EFFORT_CIRCLE[set.effort]} text-white` : 'border-slate-800 text-transparent'
         }`}
       >
         <Check size={20} strokeWidth={3} />
       </button>
     </>
+  )
+}
+
+// ---------- suggestion hint modal ----------
+
+function HintModal({ title, body, onClose }: { title: string; body: string; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center px-5">
+      <div className="absolute inset-0 bg-black/40 animate-fade-in" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl animate-pop-in">
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-2xl font-bold flex items-center gap-2">
+            <ChevronsUp className="text-blue-600 shrink-0" /> {title}
+          </h2>
+          <button type="button" aria-label="Close" onClick={onClose} className="p-1 text-slate-500">
+            <X size={24} />
+          </button>
+        </div>
+        <p className="mt-3 text-lg text-slate-600">{body}</p>
+      </div>
+    </div>
+  )
+}
+
+// ---------- rest picker sheet ----------
+
+const REST_OPTIONS = Array.from({ length: 24 }, (_, i) => 15 + i * 15) // 0:15 .. 6:00
+
+function RestPickerSheet({
+  initialSec,
+  onClose,
+  onSave,
+  onStart,
+}: {
+  initialSec: number
+  onClose: () => void
+  onSave: (sec: number) => void
+  onStart: (sec: number) => void
+}) {
+  const [sec, setSec] = useState(REST_OPTIONS.includes(initialSec) ? initialSec : 90)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const idx = REST_OPTIONS.indexOf(sec)
+    if (idx >= 0 && listRef.current) {
+      listRef.current.scrollTop = idx * 52 - listRef.current.clientHeight / 2 + 26
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <Sheet onClose={onClose}>
+      <div className="px-5 pb-8">
+        <h2 className="text-3xl font-bold text-center">Rest Timer</h2>
+        <div ref={listRef} className="mt-4 h-64 overflow-y-auto no-scrollbar snap-y snap-mandatory">
+          {REST_OPTIONS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSec(s)}
+              className={`w-full h-[52px] snap-center flex items-center justify-center text-2xl rounded-2xl ${
+                s === sec ? 'bg-slate-100 font-bold' : 'text-slate-400'
+              }`}
+            >
+              {Math.floor(s / 60)}min {s % 60}s
+            </button>
+          ))}
+        </div>
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={() => onStart(sec)}
+            className="flex-1 border-2 border-blue-500 text-blue-600 text-lg font-bold rounded-full py-3.5 active:bg-blue-50"
+          >
+            Start
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(sec)}
+            className="flex-1 bg-blue-600 text-white text-lg font-bold rounded-full py-3.5 active:bg-blue-700"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </Sheet>
   )
 }
 
@@ -358,7 +590,7 @@ function RestBar({
       <div className={`rounded-2xl shadow-xl p-3 text-white ${finished ? 'bg-green-600' : 'bg-slate-900'}`}>
         <div className="flex items-center gap-3">
           <Timer size={20} className="shrink-0" />
-          <span className="text-2xl font-bold tabular-nums w-16">{formatClock(left)}</span>
+          <span className="text-2xl font-bold tabular-nums w-16">{fmtClock(left)}</span>
           <div className="grow h-2 rounded-full bg-white/20 overflow-hidden">
             <div className="h-full bg-blue-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
           </div>
@@ -377,8 +609,12 @@ function RestBar({
   )
 }
 
-function formatClock(totalSec: number): string {
+function fmtClock(totalSec: number): string {
   const m = Math.floor(totalSec / 60)
   const s = totalSec % 60
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function formatClock(totalSec: number): string {
+  return fmtClock(totalSec)
 }
