@@ -50,8 +50,8 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
   const totalSets = session.logs.reduce((a, l) => a + l.sets.length, 0)
   const doneSets = session.logs.reduce((a, l) => a + l.sets.filter((s) => s.done).length, 0)
 
-  const startRest = () => {
-    const total = state.settings.restSec
+  const startRest = (overrideSec: number | null) => {
+    const total = overrideSec ?? state.settings.restSec
     setRest({ endsAt: Date.now() + total * 1000, total })
   }
 
@@ -143,7 +143,7 @@ function ExerciseCard({
   log: ExerciseLog
   logIndex: number
   unit: string
-  onSetDone: () => void
+  onSetDone: (restSec: number | null) => void
   onInfo: (ex: CatalogExercise) => void
 }) {
   const state = useAppState()
@@ -170,6 +170,7 @@ function ExerciseCard({
           <p className="text-slate-500 text-sm">
             Target: {log.targetSets} × {log.repsMin}-{log.repsMax}
             {log.perSide ? ' per side' : ''}
+            {log.restSec != null && ` · rest ${Math.floor(log.restSec / 60)}:${String(log.restSec % 60).padStart(2, '0')}`}
           </p>
           {partnerEx && (
             <p className="text-purple-600 text-xs font-semibold mt-0.5 flex items-center gap-1">
@@ -212,7 +213,7 @@ function ExerciseCard({
             <span />
 
             {log.sets.map((set, si) => (
-              <SetRow key={si} set={set} index={si} logIndex={logIndex} mode={mode} onDone={onSetDone} />
+              <SetRow key={si} set={set} index={si} logIndex={logIndex} mode={mode} onDone={() => onSetDone(log.restSec)} />
             ))}
           </div>
 

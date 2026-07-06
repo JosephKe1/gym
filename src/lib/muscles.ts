@@ -42,6 +42,22 @@ export function toGroup(rawMuscle: string): MuscleGroup | null {
   return RAW_TO_GROUP[rawMuscle] ?? null
 }
 
+/** Representative catalog muscle name per group — used when storing custom exercises. */
+export const GROUP_TO_RAW: Record<MuscleGroup, string> = {
+  Chest: 'chest',
+  Shoulders: 'shoulders',
+  Biceps: 'biceps',
+  Triceps: 'triceps',
+  Forearms: 'forearms',
+  Back: 'lats',
+  Abs: 'abdominals',
+  Glutes: 'glutes',
+  Quads: 'quadriceps',
+  Hamstrings: 'hamstrings',
+  Calves: 'calves',
+  Neck: 'neck',
+}
+
 export function groupsOf(primary: string[], secondary: string[] = []): MuscleGroup[] {
   const out: MuscleGroup[] = []
   for (const m of [...primary, ...secondary]) {

@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from 'react'
-import type { AppState, Effort, ExerciseLog, Plan, PlanExercise, Session, SetLog, Workout } from '../types'
+import type { AppState, CustomExercise, Effort, ExerciseLog, Plan, PlanExercise, Session, SetLog, TrackType, Workout } from '../types'
 import { seedPlan } from '../data/seed'
-import { getExercise, isTimed, isWeighted } from '../data/catalog'
+import { getExercise, isTimed, isWeighted, setCustomExercises } from '../data/catalog'
+import { migrateCoarseEquipment } from '../data/equipment'
+import { GROUP_TO_RAW, type MuscleGroup } from './muscles'
 
 const STORAGE_KEY = 'gym-app-state-v1'
-const STATE_VERSION = 2
+const STATE_VERSION = 3
 
 // ---------- helpers ----------
 
@@ -61,6 +63,7 @@ function defaultState(): AppState {
     activePlanId: plan.id,
     sessions: [],
     activeSession: null,
+    customExercises: [],
     settings: defaultSettings(),
     lastBackupAt: null,
   }
@@ -91,21 +94,26 @@ function migrate(parsed: unknown): AppState | null {
       activePlanId: plan.id,
       sessions: Array.isArray(p.sessions) ? (p.sessions as Session[]) : [],
       activeSession: (p.activeSession as Session | null) ?? null,
+      customExercises: [],
       settings: { ...defaultSettings(), ...(p.settings as object | undefined) },
       lastBackupAt: null,
     }
   }
 
-  if (p.version === STATE_VERSION && Array.isArray(p.plans) && (p.plans as Plan[]).length > 0) {
+  // v2 (coarse equipment keys, no custom exercises) and v3 share the same core shape
+  if ((p.version === 2 || p.version === STATE_VERSION) && Array.isArray(p.plans) && (p.plans as Plan[]).length > 0) {
     const plans = p.plans as Plan[]
     const activePlanId = plans.some((x) => x.id === p.activePlanId) ? (p.activePlanId as string) : plans[0].id
+    const settings = { ...defaultSettings(), ...(p.settings as object | undefined) }
+    if (p.version === 2) settings.equipment = migrateCoarseEquipment(settings.equipment)
     return {
       version: STATE_VERSION,
       plans,
       activePlanId,
       sessions: Array.isArray(p.sessions) ? (p.sessions as Session[]) : [],
       activeSession: (p.activeSession as Session | null) ?? null,
-      settings: { ...defaultSettings(), ...(p.settings as object | undefined) },
+      customExercises: Array.isArray(p.customExercises) ? (p.customExercises as CustomExercise[]) : [],
+      settings,
       lastBackupAt: typeof p.lastBackupAt === 'number' ? p.lastBackupAt : null,
     }
   }
@@ -124,6 +132,7 @@ function loadState(): AppState {
 }
 
 let state: AppState = loadState()
+setCustomExercises(state.customExercises)
 const listeners = new Set<() => void>()
 
 function persist() {
@@ -137,7 +146,9 @@ function persist() {
 }
 
 function setState(updater: (s: AppState) => AppState) {
+  const prevCustom = state.customExercises
   state = updater(state)
+  if (state.customExercises !== prevCustom) setCustomExercises(state.customExercises)
   persist()
   listeners.forEach((l) => l())
 }
@@ -310,7 +321,14 @@ export const actions = {
   },
 
   addExercise(workoutId: string, exerciseId: string, sets = 3, repsMin = 8, repsMax = 12) {
-    const slot: PlanExercise = { id: uid(), exerciseId, sets, repsMin, repsMax, perSide: false, supersetWith: null }
+    const ex = getExercise(exerciseId)
+    if (ex && 'defaultSets' in ex) {
+      const c = ex as CustomExercise
+      sets = c.defaultSets
+      repsMin = c.defaultRepsMin
+      repsMax = c.defaultRepsMax
+    }
+    const slot: PlanExercise = { id: uid(), exerciseId, sets, repsMin, repsMax, perSide: false, supersetWith: null, restSec: null }
     updateWorkout(workoutId, (w) => ({ ...w, exercises: [...w.exercises, slot] }))
   },
 
@@ -330,10 +348,14 @@ export const actions = {
     }))
   },
 
-  editSetsReps(workoutId: string, slotId: string, sets: number, repsMin: number, repsMax: number, perSide: boolean) {
+  editSetsReps(
+    workoutId: string,
+    slotId: string,
+    patch: { sets: number; repsMin: number; repsMax: number; perSide: boolean; restSec: number | null },
+  ) {
     updateWorkout(workoutId, (w) => ({
       ...w,
-      exercises: w.exercises.map((e) => (e.id === slotId ? { ...e, sets, repsMin, repsMax, perSide } : e)),
+      exercises: w.exercises.map((e) => (e.id === slotId ? { ...e, ...patch } : e)),
     }))
   },
 
@@ -381,6 +403,7 @@ export const actions = {
       repsMin: e.repsMin,
       repsMax: e.repsMax,
       supersetWith: e.supersetWith ?? null,
+      restSec: e.restSec ?? null,
       sets: Array.from({ length: e.sets }, () => emptySet()),
     }))
     const session: Session = {
@@ -441,6 +464,59 @@ export const actions = {
 
   deleteSession(sessionId: string) {
     setState((s) => ({ ...s, sessions: s.sessions.filter((x) => x.id !== sessionId) }))
+  },
+
+  // ---------- custom exercises ----------
+
+  createCustomExercise(input: {
+    name: string
+    equipmentKey: string
+    trackType: TrackType
+    primaryGroup: MuscleGroup
+    secondaryGroups: MuscleGroup[]
+    defaultSets: number
+    defaultRepsMin: number
+    defaultRepsMax: number
+  }): CustomExercise {
+    const ex: CustomExercise = {
+      id: `custom-${uid()}`,
+      custom: true,
+      name: input.name,
+      primaryMuscles: [GROUP_TO_RAW[input.primaryGroup]],
+      secondaryMuscles: input.secondaryGroups.map((g) => GROUP_TO_RAW[g]),
+      equipment: input.equipmentKey,
+      category: 'strength',
+      level: 'custom',
+      mechanic: null,
+      instructions: [],
+      image: null,
+      trackType: input.trackType,
+      defaultSets: input.defaultSets,
+      defaultRepsMin: input.defaultRepsMin,
+      defaultRepsMax: input.defaultRepsMax,
+    }
+    setState((s) => ({ ...s, customExercises: [...s.customExercises, ex] }))
+    return ex
+  },
+
+  /** Soft-delete: hidden from the picker, removed from all workouts; history stays resolvable. */
+  deleteCustomExercise(exerciseId: string) {
+    setState((s) => ({
+      ...s,
+      customExercises: s.customExercises.map((ex) => (ex.id === exerciseId ? { ...ex, deleted: true } : ex)),
+      plans: s.plans.map((p) => ({
+        ...p,
+        workouts: p.workouts.map((w) => {
+          const removed = w.exercises.filter((e) => e.exerciseId === exerciseId).map((e) => e.id)
+          return {
+            ...w,
+            exercises: w.exercises
+              .filter((e) => e.exerciseId !== exerciseId)
+              .map((e) => (e.supersetWith && removed.includes(e.supersetWith) ? { ...e, supersetWith: null } : e)),
+          }
+        }),
+      })),
+    }))
   },
 
   // ---------- settings / data ----------

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Download, Upload, RotateCcw, ShieldCheck, Shield } from 'lucide-react'
 import { actions, getState, useAppState } from '../lib/store'
-import { EQUIPMENT_TYPES } from '../data/catalog'
+import { EQUIPMENT_CATEGORIES, EQUIPMENT_ITEMS } from '../data/equipment'
 
 export default function SettingsView() {
   const { settings, lastBackupAt } = useAppState()
@@ -91,23 +91,28 @@ export default function SettingsView() {
           Pick what you have access to. The exercise picker can then narrow its results to matching exercises
           (bodyweight moves are always included).
         </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {EQUIPMENT_TYPES.map(({ key, label }) => {
-            const on = settings.equipment.includes(key)
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => actions.toggleEquipment(key)}
-                className={`px-4 py-2 rounded-full text-sm font-semibold border-2 ${
-                  on ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500'
-                }`}
-              >
-                {label}
-              </button>
-            )
-          })}
-        </div>
+        {EQUIPMENT_CATEGORIES.map((cat) => (
+          <div key={cat} className="mt-4">
+            <p className="text-xs font-bold text-slate-400 uppercase">{cat}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {EQUIPMENT_ITEMS.filter((i) => i.category === cat).map(({ key, label }) => {
+                const on = settings.equipment.includes(key)
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => actions.toggleEquipment(key)}
+                    className={`px-3.5 py-2 rounded-full text-sm font-semibold border-2 ${
+                      on ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-500'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
         <label className="flex items-center justify-between mt-5 pt-4 border-t border-slate-100">
           <span className="font-medium">Filter picker by my equipment</span>
           <input

@@ -144,6 +144,8 @@ export default function WorkoutDetail({ workoutId, onBack, onStart, onHistory }:
                   <p className="text-slate-600 mt-0.5">
                     <span className="font-semibold">{slot.sets} sets</span> · {slot.repsMin}-{slot.repsMax} reps
                     {slot.perSide ? ' per side' : ''}
+                    {slot.restSec != null &&
+                      ` · rest ${Math.floor(slot.restSec / 60)}:${String(slot.restSec % 60).padStart(2, '0')}`}
                   </p>
                   {partnerEx && (
                     <p className="text-purple-600 text-sm font-semibold mt-1 flex items-center gap-1">
@@ -238,11 +240,15 @@ function targetMuscles(workout: Workout): { group: MuscleGroup; pct: number }[] 
 // ---------- edit sets & reps sheet ----------
 
 function EditSetsRepsSheet({ workout, slot, onClose }: { workout: Workout; slot: PlanExercise; onClose: () => void }) {
+  const { settings } = useAppState()
   const [sets, setSets] = useState(slot.sets)
   const [repsMin, setRepsMin] = useState(slot.repsMin)
   const [repsMax, setRepsMax] = useState(slot.repsMax)
   const [perSide, setPerSide] = useState(slot.perSide ?? false)
+  const [restSec, setRestSec] = useState<number | null>(slot.restSec ?? null)
   const ex = getExercise(slot.exerciseId)
+
+  const fmtRest = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 
   return (
     <Sheet onClose={onClose}>
@@ -279,10 +285,43 @@ function EditSetsRepsSheet({ workout, slot, onClose }: { workout: Workout; slot:
           />
         </label>
 
+        <div className="flex items-center justify-between mt-3">
+          <div>
+            <span className="text-lg font-medium">Rest timer</span>
+            <p className="text-slate-400 text-sm">
+              {restSec === null ? `Using default (${fmtRest(settings.restSec)})` : 'Custom for this exercise'}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              aria-label="Decrease rest"
+              onClick={() => setRestSec(Math.max(15, (restSec ?? settings.restSec) - 15))}
+              className="w-11 h-11 rounded-full bg-slate-100 text-2xl font-bold active:bg-slate-200"
+            >
+              −
+            </button>
+            <span className="text-xl font-bold w-14 text-center tabular-nums">{fmtRest(restSec ?? settings.restSec)}</span>
+            <button
+              type="button"
+              aria-label="Increase rest"
+              onClick={() => setRestSec(Math.min(600, (restSec ?? settings.restSec) + 15))}
+              className="w-11 h-11 rounded-full bg-slate-100 text-2xl font-bold active:bg-slate-200"
+            >
+              +
+            </button>
+          </div>
+        </div>
+        {restSec !== null && (
+          <button type="button" onClick={() => setRestSec(null)} className="mt-1 text-blue-600 text-sm font-semibold">
+            Reset to default rest
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => {
-            actions.editSetsReps(workout.id, slot.id, sets, repsMin, repsMax, perSide)
+            actions.editSetsReps(workout.id, slot.id, { sets, repsMin, repsMax, perSide, restSec })
             onClose()
           }}
           className="mt-6 w-full bg-blue-600 text-white text-lg font-bold rounded-full py-4 active:bg-blue-700"

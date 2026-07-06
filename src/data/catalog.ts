@@ -1,14 +1,38 @@
 import raw from './exercises.json'
-import type { CatalogExercise } from '../types'
+import type { CatalogExercise, CustomExercise } from '../types'
 import { groupsOf, type MuscleGroup } from '../lib/muscles'
+import { matchesEquipment } from './equipment'
 
 export const CATALOG = raw as CatalogExercise[]
 
 const byId = new Map<string, CatalogExercise>()
 for (const ex of CATALOG) byId.set(ex.id, ex)
 
+// Custom exercises live in app state; the store mirrors them here so that
+// exercise lookup stays a plain synchronous call everywhere in the UI.
+let customById = new Map<string, CustomExercise>()
+let customList: CustomExercise[] = []
+
+export function setCustomExercises(list: CustomExercise[]) {
+  customList = list
+  customById = new Map(list.map((ex) => [ex.id, ex]))
+}
+
 export function getExercise(id: string): CatalogExercise | undefined {
-  return byId.get(id)
+  return customById.get(id) ?? byId.get(id)
+}
+
+export function getCustomExercise(id: string): CustomExercise | undefined {
+  return customById.get(id)
+}
+
+export function isCustom(ex: CatalogExercise): ex is CustomExercise {
+  return (ex as CustomExercise).custom === true
+}
+
+/** Visible (non-deleted) custom exercises. */
+export function customExercises(): CustomExercise[] {
+  return customList.filter((ex) => !ex.deleted)
 }
 
 const IMAGE_BASE = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/'
@@ -19,32 +43,14 @@ export function imageUrl(ex: CatalogExercise): string | null {
 
 /** True for exercises logged by time (seconds) rather than reps. */
 export function isTimed(ex: CatalogExercise): boolean {
+  if (isCustom(ex)) return ex.trackType === 'duration'
   return ex.category === 'cardio' || ex.category === 'stretching'
 }
 
 /** True for exercises where logging a weight makes sense. */
 export function isWeighted(ex: CatalogExercise): boolean {
+  if (isCustom(ex)) return ex.trackType === 'weight-reps' || ex.trackType === 'bodyweight-plus'
   return ex.equipment !== 'body only' && ex.equipment !== '' && ex.equipment !== 'foam roll' && ex.category !== 'cardio' && ex.category !== 'stretching'
-}
-
-/** Equipment keys as they appear in the catalog, with display labels. */
-export const EQUIPMENT_TYPES: { key: string; label: string }[] = [
-  { key: 'barbell', label: 'Barbell' },
-  { key: 'dumbbell', label: 'Dumbbell' },
-  { key: 'machine', label: 'Machine' },
-  { key: 'cable', label: 'Cable' },
-  { key: 'kettlebells', label: 'Kettlebells' },
-  { key: 'e-z curl bar', label: 'E-Z Curl Bar' },
-  { key: 'bands', label: 'Bands' },
-  { key: 'medicine ball', label: 'Medicine Ball' },
-  { key: 'exercise ball', label: 'Exercise Ball' },
-  { key: 'foam roll', label: 'Foam Roller' },
-  { key: 'body only', label: 'Bodyweight' },
-  { key: 'other', label: 'Other' },
-]
-
-function equipmentKey(ex: CatalogExercise): string {
-  return ex.equipment === '' ? 'other' : ex.equipment
 }
 
 export function searchCatalog(
@@ -53,11 +59,12 @@ export function searchCatalog(
   equipment: string[] | null = null,
 ): CatalogExercise[] {
   const q = query.trim().toLowerCase()
-  const equipSet = equipment && equipment.length > 0 ? new Set(equipment) : null
-  return CATALOG.filter((ex) => {
+  const pass = (ex: CatalogExercise) => {
     if (q && !ex.name.toLowerCase().includes(q)) return false
     if (group && !groupsOf(ex.primaryMuscles).includes(group)) return false
-    if (equipSet && !equipSet.has(equipmentKey(ex))) return false
+    // custom exercises are deliberate creations — never hide them behind the equipment filter
+    if (equipment && equipment.length > 0 && !isCustom(ex) && !matchesEquipment(ex, equipment)) return false
     return true
-  })
+  }
+  return [...customExercises().filter(pass), ...CATALOG.filter(pass)]
 }

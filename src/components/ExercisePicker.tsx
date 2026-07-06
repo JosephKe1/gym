@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { Search, ChevronRight, ChevronLeft, PersonStanding, Dumbbell, Info } from 'lucide-react'
+import { Search, ChevronRight, ChevronLeft, PersonStanding, Dumbbell, Info, Plus } from 'lucide-react'
 import Sheet from './Sheet'
 import ExerciseImage from './ExerciseImage'
-import { searchCatalog } from '../data/catalog'
+import CreateExerciseSheet from './CreateExerciseSheet'
+import { isCustom, searchCatalog } from '../data/catalog'
 import { MUSCLE_GROUPS, GROUP_BADGE, type MuscleGroup } from '../lib/muscles'
 import { actions, useAppState } from '../lib/store'
 import type { CatalogExercise } from '../types'
@@ -21,15 +22,26 @@ export default function ExercisePicker({ title = 'Select Exercise', onSelect, on
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<Tab>('all')
   const [group, setGroup] = useState<MuscleGroup | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const equipmentFilterOn = settings.filterByEquipment && settings.equipment.length > 0
   const results = useMemo(() => {
     if (tab === 'muscle' && !group && !query.trim()) return []
-    const equipment = equipmentFilterOn ? [...settings.equipment, 'body only'] : null
+    const equipment = equipmentFilterOn ? settings.equipment : null
     return searchCatalog(query, tab === 'muscle' ? group : null, equipment).slice(0, 200)
   }, [query, tab, group, equipmentFilterOn, settings.equipment])
 
   const showMuscleList = tab === 'muscle' && !group && !query.trim()
+
+  if (creating) {
+    return (
+      <CreateExerciseSheet
+        initialName={query.trim()}
+        onCreated={(ex) => onSelect(ex)}
+        onClose={() => setCreating(false)}
+      />
+    )
+  }
 
   return (
     <Sheet onClose={onClose} tall>
@@ -127,7 +139,14 @@ export default function ExercisePicker({ title = 'Select Exercise', onSelect, on
                   <div className="w-full flex items-center gap-4 bg-slate-100 rounded-2xl p-3 active:bg-slate-200">
                     <button type="button" onClick={() => onSelect(ex)} className="flex items-center gap-4 grow text-left min-w-0">
                       <ExerciseImage exercise={ex} size="sm" />
-                      <span className="text-base font-medium truncate">{ex.name}</span>
+                      <span className="min-w-0">
+                        <span className="block text-base font-medium truncate">{ex.name}</span>
+                        {isCustom(ex) && (
+                          <span className="inline-block text-[11px] font-bold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5">
+                            My exercise
+                          </span>
+                        )}
+                      </span>
                     </button>
                     {onInfo && (
                       <button
@@ -144,6 +163,16 @@ export default function ExercisePicker({ title = 'Select Exercise', onSelect, on
               ))}
               {results.length === 0 && <li className="text-center text-slate-400 py-10">No exercises found.</li>}
             </ul>
+            <div className="mt-6 mb-2 text-center">
+              <p className="text-slate-500">Can't find what you're looking for?</p>
+              <button
+                type="button"
+                onClick={() => setCreating(true)}
+                className="mt-3 inline-flex items-center gap-2 border-2 border-blue-500 text-blue-600 font-semibold rounded-full px-6 py-3 active:bg-blue-50"
+              >
+                <Plus size={18} /> Create new exercise
+              </button>
+            </div>
           </>
         )}
       </div>

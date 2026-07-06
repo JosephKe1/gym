@@ -6,9 +6,11 @@ A clean, mobile-first workout tracker for personal use, inspired by the Built Wi
 
 - **Weekly schedule** — a dated Mon–Sun plan with workouts assigned per day, complete/missed/rest states, week-to-week navigation (browse past and future weeks), and a "today" banner. Comes seeded with a 5-day Upper/Lower/Push/Pull/Legs split; everything is editable.
 - **Multiple programs** — build programs from scratch (pick a name and your available days), switch between them, rename, delete.
-- **Equipment filter** — select the equipment you have in Settings and the exercise picker narrows to matching exercises.
+- **Equipment filter** — pick your available equipment from a categorized list (free weights, specific machines, benches, bands, etc.) and the exercise picker narrows to matching exercises.
 - **Workout editor** — per-workout target-muscle breakdown (with %), and per-exercise menu: Swap, Remove, Edit Sets & Reps, Superset with…, reorder.
 - **Exercise catalog** — 873 exercises from the public-domain [free-exercise-db](https://github.com/yuhonas/free-exercise-db), searchable and filterable by muscle group, with step-by-step instructions and photos.
+- **Custom exercises** — create your own from the picker: name, equipment, tracking type (weight+reps / bodyweight / bodyweight+added / duration / reps only), primary and secondary muscles, default sets and rep range.
+- **Per-exercise rest times** — override the global rest timer for any exercise via Edit Sets & Reps; the session timer uses it automatically.
 - **Session logging** — per-set weight, reps (or time for planks/cardio/stretches), effort rating (Easy / Ideal / Max), and a set-completion checkmark that auto-starts a **rest timer** (adjustable ±15s, skippable, vibrates when done). Shows what you lifted last time. An in-progress session survives page reloads.
 - **Progress** — top-set weight chart per exercise, plus full session history with volume and duration.
 - **Settings** — lb/kg, default rest duration, equipment selection, JSON export/import backup, full reset.

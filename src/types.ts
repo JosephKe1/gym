@@ -13,6 +13,20 @@ export interface CatalogExercise {
   image: string | null
 }
 
+/** How a custom exercise is tracked during a session. */
+export type TrackType = 'weight-reps' | 'bodyweight' | 'bodyweight-plus' | 'duration' | 'reps-only'
+
+/** A user-created exercise. Shape-compatible with CatalogExercise so it renders everywhere. */
+export interface CustomExercise extends CatalogExercise {
+  custom: true
+  trackType: TrackType
+  defaultSets: number
+  defaultRepsMin: number
+  defaultRepsMax: number
+  /** Soft-deleted: hidden from the picker but still resolvable for history. */
+  deleted?: boolean
+}
+
 // ---------- Workout plan ----------
 
 /** An exercise slot inside a workout template. */
@@ -27,6 +41,8 @@ export interface PlanExercise {
   perSide?: boolean
   /** Slot id of the exercise this one is supersetted with. */
   supersetWith?: string | null
+  /** Rest between sets for this exercise, in seconds. null/undefined = use the global default. */
+  restSec?: number | null
 }
 
 export interface Workout {
@@ -66,6 +82,8 @@ export interface ExerciseLog {
   repsMin: number
   repsMax: number
   supersetWith: string | null
+  /** Per-exercise rest override captured at session start. */
+  restSec: number | null
   sets: SetLog[]
 }
 
@@ -97,6 +115,7 @@ export interface AppState {
   activePlanId: string
   sessions: Session[]
   activeSession: Session | null
+  customExercises: CustomExercise[]
   settings: Settings
   /** Timestamp of the last JSON backup export, for reminder nudges. */
   lastBackupAt: number | null
