@@ -7,14 +7,13 @@ import {
   CheckCircle2,
   PersonStanding,
   Play,
-  ChevronLeft,
-  ChevronRight,
   FolderKanban,
   Download,
 } from 'lucide-react'
 import Menu from '../components/Menu'
 import Sheet from '../components/Sheet'
 import ProgramsSheet from '../components/ProgramsSheet'
+import CalendarStrip from '../components/CalendarStrip'
 import { actions, activePlan, dayStatusFor, sessionsOn, useAppState, weekDates, weekRangeLabel, weekdayIndex, localDate, type DayStatus } from '../lib/store'
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
@@ -45,6 +44,8 @@ export default function WeekView({
 
   return (
     <div className="pb-28">
+      <CalendarStrip weekOffset={weekOffset} onSelectWeekOffset={setWeekOffset} />
+
       <header className="px-5 pt-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-slate-500 text-sm">{plan.subtitle}</p>
@@ -106,33 +107,13 @@ export default function WeekView({
         <h2 className="text-2xl font-bold">
           {weekOffset === 0 ? "This Week's Schedule" : weekOffset === -1 ? 'Last Week' : weekOffset === 1 ? 'Next Week' : 'Schedule'}
         </h2>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Previous week"
-            onClick={() => setWeekOffset((o) => o - 1)}
-            className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 active:bg-slate-200"
-          >
-            <ChevronLeft size={18} />
-          </button>
-          <button
-            type="button"
-            aria-label="Next week"
-            onClick={() => setWeekOffset((o) => o + 1)}
-            className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 active:bg-slate-200"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-      </div>
-      <div className="px-5 mt-1 flex items-center gap-3">
-        <p className="text-slate-400 text-sm">{weekRangeLabel(weekOffset)}</p>
         {weekOffset !== 0 && (
           <button type="button" onClick={() => setWeekOffset(0)} className="text-blue-600 text-sm font-semibold">
             Back to today
           </button>
         )}
       </div>
+      <p className="px-5 mt-1 text-slate-400 text-sm">{weekRangeLabel(weekOffset)}</p>
 
       <ul className="px-5 mt-4 space-y-3">
         {DAY_LABELS.map((label, i) => {

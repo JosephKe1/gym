@@ -3,15 +3,23 @@ import { Check, ChevronDown, Link2, Minus, Plus, Timer, X } from 'lucide-react'
 import Menu from '../components/Menu'
 import ExerciseImage from '../components/ExerciseImage'
 import ExerciseInfoSheet from '../components/ExerciseInfoSheet'
+import EffortModal from '../components/EffortModal'
 import { getExercise } from '../data/catalog'
 import { actions, lastPerformance, logMode, useAppState, EFFORT_LABEL } from '../lib/store'
 import type { CatalogExercise, Effort, ExerciseLog, SetLog } from '../types'
 
-const EFFORT_ORDER: (Effort | null)[] = [null, 'easy', 'ideal', 'max']
 const EFFORT_STYLE: Record<Effort, string> = {
-  easy: 'bg-green-100 text-green-700 border-green-300',
-  ideal: 'bg-blue-100 text-blue-700 border-blue-300',
+  easy: 'bg-teal-100 text-teal-700 border-teal-300',
+  ideal: 'bg-amber-100 text-amber-700 border-amber-300',
   max: 'bg-red-100 text-red-700 border-red-300',
+}
+
+interface RatingTarget {
+  logIndex: number
+  setIndex: number
+  restSec: number | null
+  /** Set was already complete — re-rating only, no rest timer. */
+  wasDone: boolean
 }
 
 export default function SessionView({ onDone }: { onDone: () => void }) {
@@ -21,6 +29,7 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
   const [now, setNow] = useState(Date.now())
   const [infoExercise, setInfoExercise] = useState<CatalogExercise | null>(null)
   const [elapsed, setElapsed] = useState(0)
+  const [rating, setRating] = useState<RatingTarget | null>(null)
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -101,7 +110,7 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
             log={log}
             logIndex={li}
             unit={state.settings.unit}
-            onSetDone={startRest}
+            onRequestRating={setRating}
             onInfo={setInfoExercise}
           />
         ))}
@@ -127,6 +136,17 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
       )}
 
       {infoExercise && <ExerciseInfoSheet exercise={infoExercise} onClose={() => setInfoExercise(null)} />}
+
+      {rating && (
+        <EffortModal
+          onClose={() => setRating(null)}
+          onPick={(effort) => {
+            actions.updateSet(rating.logIndex, rating.setIndex, { effort, done: true })
+            if (!rating.wasDone) startRest(rating.restSec)
+            setRating(null)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -137,13 +157,13 @@ function ExerciseCard({
   log,
   logIndex,
   unit,
-  onSetDone,
+  onRequestRating,
   onInfo,
 }: {
   log: ExerciseLog
   logIndex: number
   unit: string
-  onSetDone: (restSec: number | null) => void
+  onRequestRating: (target: RatingTarget) => void
   onInfo: (ex: CatalogExercise) => void
 }) {
   const state = useAppState()
@@ -213,7 +233,14 @@ function ExerciseCard({
             <span />
 
             {log.sets.map((set, si) => (
-              <SetRow key={si} set={set} index={si} logIndex={logIndex} mode={mode} onDone={() => onSetDone(log.restSec)} />
+              <SetRow
+                key={si}
+                set={set}
+                index={si}
+                logIndex={logIndex}
+                mode={mode}
+                onRate={(wasDone) => onRequestRating({ logIndex, setIndex: si, restSec: log.restSec, wasDone })}
+              />
             ))}
           </div>
 
@@ -248,23 +275,18 @@ function SetRow({
   index,
   logIndex,
   mode,
-  onDone,
+  onRate,
 }: {
   set: SetLog
   index: number
   logIndex: number
   mode: 'weight-reps' | 'reps' | 'time'
-  onDone: () => void
+  onRate: (wasDone: boolean) => void
 }) {
-  const cycleEffort = () => {
-    const next = EFFORT_ORDER[(EFFORT_ORDER.indexOf(set.effort) + 1) % EFFORT_ORDER.length]
-    actions.updateSet(logIndex, index, { effort: next })
-  }
-
   const toggleDone = () => {
-    const done = !set.done
-    actions.updateSet(logIndex, index, { done })
-    if (done) onDone()
+    // completing a set requires an effort rating; unchecking clears done but keeps the rating
+    if (set.done) actions.updateSet(logIndex, index, { done: false })
+    else onRate(false)
   }
 
   const numInput = (field: 'weight' | 'reps' | 'timeSec', placeholder: string) => (
@@ -294,7 +316,8 @@ function SetRow({
       )}
       <button
         type="button"
-        onClick={cycleEffort}
+        aria-label="Rate effort"
+        onClick={() => onRate(set.done)}
         className={`text-xs font-bold rounded-full py-2 border ${
           set.effort ? EFFORT_STYLE[set.effort] : 'bg-slate-50 text-slate-400 border-slate-200'
         }`}
