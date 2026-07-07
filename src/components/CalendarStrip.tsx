@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Dumbbell } from 'lucide-react'
-import { activePlan, localDate, useAppState, weekdayIndex } from '../lib/store'
+import { activePlan, localDate, useAppState, weekdayIndex, workoutIdForDate } from '../lib/store'
 import type { AppState } from '../types'
 
 const DAY_HEADERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
@@ -148,7 +148,7 @@ function DayCircle({ date, state, onPick }: { date: Date; state: AppState; onPic
   const iso = localDate(date)
   const isToday = iso === localDate()
   const plan = activePlan(state)
-  const scheduled = plan.schedule[weekdayIndex(date)] !== null
+  const scheduled = workoutIdForDate(plan, iso) !== null
 
   // completion ring: share of planned sets actually done across that day's finished sessions
   let fraction = 0

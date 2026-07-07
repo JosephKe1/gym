@@ -5,7 +5,9 @@ A clean, mobile-first workout tracker for personal use, inspired by the Built Wi
 ## Features
 
 - **Weekly schedule** — a dated Mon–Sun plan with workouts assigned per day, complete/missed/rest states, week-to-week navigation (browse past and future weeks), and a "today" banner. Comes seeded with a 5-day Upper/Lower/Push/Pull/Legs split; everything is editable.
-- **Multiple programs** — build programs from scratch (pick a name and your available days), switch between them, rename, delete.
+- **Multiple programs** — build programs from scratch (weekly or rotating cycle), switch between them, rename, delete.
+- **Guided program builder** — a BWS-style wizard (goal, body fat %, training level, availability, focus, style, priority muscle, gym type + equipment) that recommends a split, generates every workout from your equipment, and previews the program before you start it.
+- **Rotating splits** — programs can repeat on an N-day cycle instead of a fixed weekly schedule (e.g. Push/Pull/Legs/Rest); the weekly view and calendar show each week's actual lineup, and the rotation can be shifted if you miss a day.
 - **Equipment filter** — pick your available equipment from a categorized list (free weights, specific machines, benches, bands, etc.) and the exercise picker narrows to matching exercises.
 - **Workout editor** — per-workout target-muscle breakdown (with %), and per-exercise menu: Swap, Remove, Edit Sets & Reps, Superset with…, reorder.
 - **Exercise catalog** — 873 exercises from the public-domain [free-exercise-db](https://github.com/yuhonas/free-exercise-db), searchable and filterable by muscle group, with step-by-step instructions and photos.

@@ -14,7 +14,7 @@ import Menu from '../components/Menu'
 import Sheet from '../components/Sheet'
 import ProgramsSheet from '../components/ProgramsSheet'
 import CalendarStrip from '../components/CalendarStrip'
-import { actions, activePlan, dayStatusFor, sessionsOn, useAppState, weekDates, weekRangeLabel, weekdayIndex, localDate, type DayStatus } from '../lib/store'
+import { actions, activePlan, dayStatusFor, sessionsOn, useAppState, weekDates, weekRangeLabel, workoutIdForDate, localDate, type DayStatus } from '../lib/store'
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 const BACKUP_NUDGE_MS = 21 * 24 * 60 * 60 * 1000 // 3 weeks
@@ -28,13 +28,12 @@ export default function WeekView({
 }) {
   const state = useAppState()
   const plan = activePlan(state)
-  const [assignDay, setAssignDay] = useState<number | null>(null)
+  const [assignDate, setAssignDate] = useState<string | null>(null)
   const [showPrograms, setShowPrograms] = useState(false)
   const [weekOffset, setWeekOffset] = useState(0)
 
   const dates = weekDates(weekOffset)
-  const today = weekdayIndex()
-  const todayWorkoutId = plan.schedule[today]
+  const todayWorkoutId = workoutIdForDate(plan, localDate())
   const todayWorkout = plan.workouts.find((w) => w.id === todayWorkoutId)
   const todayStatus = dayStatusFor(state, localDate(), todayWorkoutId ?? null)
 
@@ -118,7 +117,7 @@ export default function WeekView({
       <ul className="px-5 mt-4 space-y-3">
         {DAY_LABELS.map((label, i) => {
           const date = dates[i]
-          const workoutId = plan.schedule[i]
+          const workoutId = workoutIdForDate(plan, date)
           const workout = plan.workouts.find((w) => w.id === workoutId)
           const status = dayStatusFor(state, date, workoutId ?? null)
           const doneNames =
@@ -140,13 +139,13 @@ export default function WeekView({
                 workoutName={workout?.name ?? null}
                 doneNames={doneNames}
                 onOpen={() => workout && onOpenWorkout(workout.id)}
-                onAdd={() => setAssignDay(i)}
+                onAdd={() => setAssignDate(date)}
                 menu={
                   <Menu
                     items={[
-                      { label: workout ? 'Change workout' : 'Assign workout', onClick: () => setAssignDay(i) },
+                      { label: workout ? 'Change workout' : 'Assign workout', onClick: () => setAssignDate(date) },
                       ...(workout
-                        ? [{ label: 'Make it a rest day', danger: true, onClick: () => actions.assignWorkoutToDay(i, null) }]
+                        ? [{ label: 'Make it a rest day', danger: true, onClick: () => actions.assignWorkoutToDate(date, null) }]
                         : []),
                     ]}
                   />
@@ -157,10 +156,10 @@ export default function WeekView({
         })}
       </ul>
 
-      {assignDay !== null && (
+      {assignDate !== null && (
         <AssignWorkoutSheet
-          dayIndex={assignDay}
-          onClose={() => setAssignDay(null)}
+          date={assignDate}
+          onClose={() => setAssignDate(null)}
           onOpenWorkout={onOpenWorkout}
         />
       )}
@@ -243,11 +242,11 @@ function DayCard({
 }
 
 function AssignWorkoutSheet({
-  dayIndex,
+  date,
   onClose,
   onOpenWorkout,
 }: {
-  dayIndex: number
+  date: string
   onClose: () => void
   onOpenWorkout: (id: string) => void
 }) {
@@ -257,15 +256,21 @@ function AssignWorkoutSheet({
     <Sheet onClose={onClose}>
       <div className="px-5 pb-8">
         <h2 className="text-2xl font-bold">
-          {DAY_LABELS[dayIndex]} · Choose a workout
+          {formatAssignDate(date)} · Choose a workout
         </h2>
+        {plan.cycle && (
+          <p className="text-slate-400 text-sm mt-1">
+            This program rotates every {plan.cycle.days.length} days — the change applies to this slot in every
+            rotation.
+          </p>
+        )}
         <ul className="mt-4 space-y-3">
           {plan.workouts.map((w) => (
             <li key={w.id}>
               <button
                 type="button"
                 onClick={() => {
-                  actions.assignWorkoutToDay(dayIndex, w.id)
+                  actions.assignWorkoutToDate(date, w.id)
                   onClose()
                 }}
                 className="w-full flex items-center gap-4 bg-slate-100 rounded-2xl p-4 active:bg-slate-200"
@@ -282,7 +287,8 @@ function AssignWorkoutSheet({
               onClick={() => {
                 const name = prompt('New workout name', 'New Workout')
                 if (!name?.trim()) return
-                const id = actions.addWorkout(name.trim(), dayIndex)
+                const id = actions.addWorkout(name.trim(), null)
+                actions.assignWorkoutToDate(date, id)
                 onClose()
                 onOpenWorkout(id)
               }}
@@ -295,4 +301,9 @@ function AssignWorkoutSheet({
       </div>
     </Sheet>
   )
+}
+
+function formatAssignDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
 }

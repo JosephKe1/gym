@@ -55,6 +55,14 @@ export interface Workout {
   exercises: PlanExercise[]
 }
 
+/** Rotating schedule: a repeating cycle of N days anchored to a date, independent of weekdays. */
+export interface CycleSchedule {
+  /** Repeating pattern; each entry is a workout id or null (rest). Length = cycle length. */
+  days: (string | null)[]
+  /** YYYY-MM-DD of cycle day 1. Shift this to slide the rotation. */
+  anchorDate: string
+}
+
 export interface Plan {
   id: string
   name: string
@@ -63,6 +71,8 @@ export interface Plan {
   workouts: Workout[]
   /** Monday-first: schedule[0] = Mon ... schedule[6] = Sun. Value is a workout id or null (rest). */
   schedule: (string | null)[]
+  /** When set, the rotating cycle replaces the weekly schedule. */
+  cycle?: CycleSchedule | null
 }
 
 // ---------- Session logging ----------

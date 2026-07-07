@@ -172,6 +172,27 @@ export function activePlan(s: AppState): Plan {
   return s.plans.find((p) => p.id === s.activePlanId) ?? s.plans[0]
 }
 
+/** Days between two YYYY-MM-DD dates (b - a), DST-safe. */
+function daysBetween(a: string, b: string): number {
+  const [ay, am, ad] = a.split('-').map(Number)
+  const [by, bm, bd] = b.split('-').map(Number)
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000)
+}
+
+/**
+ * The workout scheduled on a given date — weekly plans map by weekday,
+ * rotating plans by position in their cycle (works for past and future dates).
+ */
+export function workoutIdForDate(plan: Plan, date: string): string | null {
+  if (plan.cycle && plan.cycle.days.length > 0) {
+    const n = plan.cycle.days.length
+    const idx = ((daysBetween(plan.cycle.anchorDate, date) % n) + n) % n
+    return plan.cycle.days[idx]
+  }
+  const [y, m, d] = date.split('-').map(Number)
+  return plan.schedule[weekdayIndex(new Date(y, m - 1, d))]
+}
+
 // ---------- IndexedDB mirror (second copy of the same state) ----------
 
 const IDB_NAME = 'gym-app-backup'
@@ -310,6 +331,69 @@ export const actions = {
     updatePlan((p) => ({
       ...p,
       schedule: p.schedule.map((d, i) => (i === dayIndex ? workoutId : d)),
+    }))
+  },
+
+  /** Assign a workout to the slot a date falls on — weekday for weekly plans, cycle position for rotations. */
+  assignWorkoutToDate(date: string, workoutId: string | null) {
+    updatePlan((p) => {
+      if (p.cycle && p.cycle.days.length > 0) {
+        const n = p.cycle.days.length
+        const [ay, am, ad] = p.cycle.anchorDate.split('-').map(Number)
+        const [by, bm, bd] = date.split('-').map(Number)
+        const diff = Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000)
+        const idx = ((diff % n) + n) % n
+        return { ...p, cycle: { ...p.cycle, days: p.cycle.days.map((d, i) => (i === idx ? workoutId : d)) } }
+      }
+      const [y, m, d] = date.split('-').map(Number)
+      const dayIndex = weekdayIndex(new Date(y, m - 1, d))
+      return { ...p, schedule: p.schedule.map((x, i) => (i === dayIndex ? workoutId : x)) }
+    })
+  },
+
+  /** Slide a rotating plan's cycle by N days (e.g. +1 after missing a day). */
+  shiftCycle(planId: string, deltaDays: number) {
+    setState((s) => ({
+      ...s,
+      plans: s.plans.map((p) => {
+        if (p.id !== planId || !p.cycle) return p
+        const [y, m, d] = p.cycle.anchorDate.split('-').map(Number)
+        const anchor = new Date(y, m - 1, d)
+        anchor.setDate(anchor.getDate() + deltaDays)
+        return { ...p, cycle: { ...p.cycle, anchorDate: localDate(anchor) } }
+      }),
+    }))
+  },
+
+  /** Create a rotating program: entries are workout names (null = rest day). Cycle starts today. */
+  createCyclePlan(name: string, entries: (string | null)[]): string {
+    const id = uid()
+    const workouts: Workout[] = []
+    const days: (string | null)[] = entries.map((entry) => {
+      if (entry === null) return null
+      const wid = uid()
+      workouts.push({ id: wid, name: entry, exercises: [] })
+      return wid
+    })
+    const plan: Plan = {
+      id,
+      name,
+      subtitle: 'Custom Program',
+      createdAt: Date.now(),
+      workouts,
+      schedule: [null, null, null, null, null, null, null],
+      cycle: { days, anchorDate: localDate() },
+    }
+    setState((s) => ({ ...s, plans: [...s.plans, plan], activePlanId: id }))
+    return id
+  },
+
+  /** Insert a wizard-generated plan. */
+  addGeneratedPlan(plan: Plan, activate: boolean) {
+    setState((s) => ({
+      ...s,
+      plans: [...s.plans, plan],
+      activePlanId: activate ? plan.id : s.activePlanId,
     }))
   },
 
@@ -680,6 +764,10 @@ export const actions = {
 
   setRestSec(restSec: number) {
     setState((s) => ({ ...s, settings: { ...s.settings, restSec } }))
+  },
+
+  setEquipment(keys: string[]) {
+    setState((s) => ({ ...s, settings: { ...s.settings, equipment: keys, filterByEquipment: keys.length > 0 } }))
   },
 
   toggleEquipment(key: string) {
