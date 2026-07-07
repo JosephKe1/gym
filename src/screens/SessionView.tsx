@@ -830,7 +830,7 @@ function RestBar({
   const pct = total > 0 ? Math.max(0, Math.min(100, (left / total) * 100)) : 0
   const finished = left === 0
   return (
-    <div className="fixed bottom-20 inset-x-0 px-4 max-w-lg mx-auto z-40">
+    <div className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] inset-x-0 px-4 max-w-lg mx-auto z-40">
       <div className={`rounded-2xl shadow-xl p-3 text-white ${finished ? 'bg-green-600' : 'bg-slate-900'}`}>
         <div className="flex items-center gap-3">
           <Timer size={20} className="shrink-0" />

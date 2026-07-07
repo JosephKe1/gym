@@ -58,7 +58,7 @@ export default function WorkoutDetail({ workoutId, onBack, onStart, onHistory }:
   const dayName = dayIndex >= 0 ? ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][dayIndex] : null
 
   return (
-    <div className="pb-48">
+    <div className="pb-28">
       <header className="px-5 pt-4 flex items-start gap-4 bg-slate-100/80 pb-4 border-b border-slate-200">
         <button type="button" onClick={onBack} aria-label="Back" className="mt-2 p-1 -m-1">
           <ArrowLeft size={26} />
@@ -185,7 +185,7 @@ export default function WorkoutDetail({ workoutId, onBack, onStart, onHistory }:
       </section>
 
       {workout.exercises.length > 0 && (
-        <div className="fixed bottom-20 inset-x-0 px-5 max-w-lg mx-auto">
+        <div className="px-5 mt-6">
           <button
             type="button"
             onClick={onStart}

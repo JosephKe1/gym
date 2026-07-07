@@ -48,7 +48,7 @@ export default function App() {
         <button
           type="button"
           onClick={() => setInSession(true)}
-          className="fixed bottom-20 inset-x-5 max-w-lg sm:mx-auto bg-slate-900 text-white rounded-2xl py-3.5 px-5 font-semibold shadow-xl flex items-center justify-center gap-2 z-40"
+          className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] inset-x-5 max-w-lg sm:mx-auto bg-slate-900 text-white rounded-2xl py-3.5 px-5 font-semibold shadow-xl flex items-center justify-center gap-2 z-40"
         >
           <Play size={16} fill="currentColor" /> Resume workout: {state.activeSession.workoutName}
         </button>
