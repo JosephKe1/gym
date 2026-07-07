@@ -354,7 +354,7 @@ export const actions = {
   editSetsReps(
     workoutId: string,
     slotId: string,
-    patch: { sets: number; repsMin: number; repsMax: number; perSide: boolean; restSec: number | null },
+    patch: { sets: number; repsMin: number; repsMax: number; perSide: boolean; restSec: number | null; trackWeight?: boolean },
   ) {
     updateWorkout(workoutId, (w) => ({
       ...w,
@@ -410,6 +410,7 @@ export const actions = {
         repsMax: e.repsMax,
         supersetWith: e.supersetWith ?? null,
         restSec: e.restSec ?? null,
+        trackWeight: e.trackWeight ?? false,
         sets: suggestions.map((s) => ({ ...emptySet(), weight: s.weight, reps: s.reps })),
       }
     })
@@ -454,6 +455,130 @@ export const actions = {
         li === logIndex && log.sets.length > 1 ? { ...log, sets: log.sets.slice(0, -1) } : log,
       )
       return { ...s, activeSession: { ...s.activeSession, logs } }
+    })
+  },
+
+  // ---------- in-session workout editing ----------
+  // Each takes alsoPlan: true applies the change to the plan workout too (future sessions).
+
+  sessionAddExercise(exerciseId: string, alsoPlan: boolean) {
+    const ex = getExercise(exerciseId)
+    let sets = 3
+    let repsMin = 8
+    let repsMax = 12
+    let restSec: number | null = null
+    if (ex && 'defaultSets' in ex) {
+      const c = ex as CustomExercise
+      sets = c.defaultSets
+      repsMin = c.defaultRepsMin
+      repsMax = c.defaultRepsMax
+      restSec = c.defaultRestSec ?? null
+    }
+    const slotId = uid()
+    setState((s) => {
+      if (!s.activeSession) return s
+      const suggestions = suggestSets(logMode(exerciseId), sets, repsMax, lastPerformance(s, exerciseId))
+      const log: ExerciseLog = {
+        slotId,
+        exerciseId,
+        perSide: false,
+        targetSets: sets,
+        repsMin,
+        repsMax,
+        supersetWith: null,
+        restSec,
+        trackWeight: false,
+        sets: suggestions.map((x) => ({ ...emptySet(), weight: x.weight, reps: x.reps })),
+      }
+      const slot: PlanExercise = { id: slotId, exerciseId, sets, repsMin, repsMax, perSide: false, supersetWith: null, restSec }
+      return {
+        ...s,
+        activeSession: { ...s.activeSession, logs: [...s.activeSession.logs, log] },
+        plans: alsoPlan ? patchSessionWorkout(s, (w) => ({ ...w, exercises: [...w.exercises, slot] })) : s.plans,
+      }
+    })
+  },
+
+  sessionRemoveExercise(logIndex: number, alsoPlan: boolean) {
+    setState((s) => {
+      if (!s.activeSession) return s
+      const slotId = s.activeSession.logs[logIndex]?.slotId
+      if (!slotId) return s
+      const logs = s.activeSession.logs
+        .filter((_, i) => i !== logIndex)
+        .map((l) => (l.supersetWith === slotId ? { ...l, supersetWith: null } : l))
+      return {
+        ...s,
+        activeSession: { ...s.activeSession, logs },
+        plans: alsoPlan
+          ? patchSessionWorkout(s, (w) => ({
+              ...w,
+              exercises: w.exercises
+                .filter((e) => e.id !== slotId)
+                .map((e) => (e.supersetWith === slotId ? { ...e, supersetWith: null } : e)),
+            }))
+          : s.plans,
+      }
+    })
+  },
+
+  /** Swap the exercise: un-done sets are re-prefilled for the new exercise; completed sets are cleared. */
+  sessionSwapExercise(logIndex: number, newExerciseId: string, alsoPlan: boolean) {
+    setState((s) => {
+      if (!s.activeSession) return s
+      const log = s.activeSession.logs[logIndex]
+      if (!log) return s
+      const suggestions = suggestSets(logMode(newExerciseId), log.sets.length, log.repsMax, lastPerformance(s, newExerciseId))
+      const logs = s.activeSession.logs.map((l, i) =>
+        i === logIndex
+          ? {
+              ...l,
+              exerciseId: newExerciseId,
+              trackWeight: false,
+              sets: l.sets.map((_, si) => ({ ...emptySet(), weight: suggestions[si]?.weight ?? null, reps: suggestions[si]?.reps ?? null })),
+            }
+          : l,
+      )
+      return {
+        ...s,
+        activeSession: { ...s.activeSession, logs },
+        plans: alsoPlan
+          ? patchSessionWorkout(s, (w) => ({
+              ...w,
+              exercises: w.exercises.map((e) => (e.id === log.slotId ? { ...e, exerciseId: newExerciseId } : e)),
+            }))
+          : s.plans,
+      }
+    })
+  },
+
+  sessionEditTargets(
+    logIndex: number,
+    patch: { sets: number; repsMin: number; repsMax: number; perSide: boolean; trackWeight: boolean },
+    alsoPlan: boolean,
+  ) {
+    setState((s) => {
+      if (!s.activeSession) return s
+      const log = s.activeSession.logs[logIndex]
+      if (!log) return s
+      const resized = [...log.sets]
+      while (resized.length < patch.sets) resized.push(emptySet())
+      resized.length = patch.sets
+      const logs = s.activeSession.logs.map((l, i) =>
+        i === logIndex
+          ? { ...l, targetSets: patch.sets, repsMin: patch.repsMin, repsMax: patch.repsMax, perSide: patch.perSide, trackWeight: patch.trackWeight, sets: resized }
+          : l,
+      )
+      return {
+        ...s,
+        activeSession: { ...s.activeSession, logs },
+        plans: alsoPlan
+          ? patchSessionWorkout(s, (w) => ({
+              ...w,
+              exercises: w.exercises.map((e) => (e.id === log.slotId ? { ...e, ...patch } : e)),
+            }))
+          : s.plans,
+      }
     })
   },
 
@@ -591,6 +716,16 @@ export const actions = {
 
 function emptySet(): SetLog {
   return { weight: null, reps: null, timeSec: null, effort: null, done: false }
+}
+
+/** Apply a workout transform to the plan workout of the active session. */
+function patchSessionWorkout(s: AppState, fn: (w: Workout) => Workout): Plan[] {
+  const workoutId = s.activeSession?.workoutId
+  if (!workoutId) return s.plans
+  return s.plans.map((p) => ({
+    ...p,
+    workouts: p.workouts.map((w) => (w.id === workoutId ? fn(w) : w)),
+  }))
 }
 
 // ---------- derived data ----------

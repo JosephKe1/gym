@@ -45,6 +45,8 @@ export interface PlanExercise {
   supersetWith?: string | null
   /** Rest between sets for this exercise, in seconds. null/undefined = use the global default. */
   restSec?: number | null
+  /** For timed exercises: also log a weight (weighted planks, loaded carries). */
+  trackWeight?: boolean
 }
 
 export interface Workout {
@@ -86,6 +88,8 @@ export interface ExerciseLog {
   supersetWith: string | null
   /** Per-exercise rest override captured at session start. */
   restSec: number | null
+  /** For timed exercises: also log a weight. */
+  trackWeight?: boolean
   sets: SetLog[]
 }
 

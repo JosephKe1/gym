@@ -18,6 +18,7 @@ import ExercisePicker from '../components/ExercisePicker'
 import ExerciseImage from '../components/ExerciseImage'
 import ExerciseInfoSheet from '../components/ExerciseInfoSheet'
 import { getExercise } from '../data/catalog'
+import { logMode } from '../lib/store'
 import { toGroup, GROUP_BADGE, type MuscleGroup } from '../lib/muscles'
 import { actions, activePlan, useAppState } from '../lib/store'
 import type { CatalogExercise, PlanExercise, Workout } from '../types'
@@ -57,7 +58,7 @@ export default function WorkoutDetail({ workoutId, onBack, onStart, onHistory }:
   const dayName = dayIndex >= 0 ? ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][dayIndex] : null
 
   return (
-    <div className="pb-32">
+    <div className="pb-48">
       <header className="px-5 pt-4 flex items-start gap-4 bg-slate-100/80 pb-4 border-b border-slate-200">
         <button type="button" onClick={onBack} aria-label="Back" className="mt-2 p-1 -m-1">
           <ArrowLeft size={26} />
@@ -142,8 +143,10 @@ export default function WorkoutDetail({ workoutId, onBack, onStart, onHistory }:
                 <div className="grow min-w-0">
                   <p className="text-lg font-bold leading-snug">{ex.name}</p>
                   <p className="text-slate-600 mt-0.5">
-                    <span className="font-semibold">{slot.sets} sets</span> · {slot.repsMin}-{slot.repsMax} reps
-                    {slot.perSide ? ' per side' : ''}
+                    <span className="font-semibold">{slot.sets} sets</span>
+                    {logMode(slot.exerciseId) === 'time'
+                      ? ` · timed${slot.trackWeight ? ' + weight' : ''}`
+                      : ` · ${slot.repsMin}-${slot.repsMax} reps${slot.perSide ? ' per side' : ''}`}
                     {slot.restSec != null &&
                       ` · rest ${Math.floor(slot.restSec / 60)}:${String(slot.restSec % 60).padStart(2, '0')}`}
                   </p>
@@ -246,44 +249,65 @@ function EditSetsRepsSheet({ workout, slot, onClose }: { workout: Workout; slot:
   const [repsMax, setRepsMax] = useState(slot.repsMax)
   const [perSide, setPerSide] = useState(slot.perSide ?? false)
   const [restSec, setRestSec] = useState<number | null>(slot.restSec ?? null)
+  const [trackWeight, setTrackWeight] = useState(slot.trackWeight ?? false)
   const ex = getExercise(slot.exerciseId)
+  const timed = logMode(slot.exerciseId) === 'time'
 
   const fmtRest = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
 
   return (
     <Sheet onClose={onClose}>
       <div className="px-5 pb-8">
-        <h2 className="text-2xl font-bold">Edit Sets & Reps</h2>
+        <h2 className="text-2xl font-bold">{timed ? 'Edit Sets' : 'Edit Sets & Reps'}</h2>
         <p className="text-slate-400 mt-1">{ex?.name}</p>
 
         <Stepper label="Sets" value={sets} min={1} max={10} onChange={setSets} />
-        <Stepper
-          label="Min reps"
-          value={repsMin}
-          min={1}
-          max={100}
-          onChange={(v) => {
-            setRepsMin(v)
-            if (v > repsMax) setRepsMax(v)
-          }}
-        />
-        <Stepper
-          label="Max reps"
-          value={repsMax}
-          min={repsMin}
-          max={100}
-          onChange={setRepsMax}
-        />
+        {!timed && (
+          <>
+            <Stepper
+              label="Min reps"
+              value={repsMin}
+              min={1}
+              max={100}
+              onChange={(v) => {
+                setRepsMin(v)
+                if (v > repsMax) setRepsMax(v)
+              }}
+            />
+            <Stepper
+              label="Max reps"
+              value={repsMax}
+              min={repsMin}
+              max={100}
+              onChange={setRepsMax}
+            />
+          </>
+        )}
 
-        <label className="flex items-center justify-between mt-5 py-2">
-          <span className="text-lg font-medium">Per side (unilateral)</span>
-          <input
-            type="checkbox"
-            checked={perSide}
-            onChange={(e) => setPerSide(e.target.checked)}
-            className="w-6 h-6 accent-blue-600"
-          />
-        </label>
+        {!timed ? (
+          <label className="flex items-center justify-between mt-5 py-2">
+            <span className="text-lg font-medium">Per side (unilateral)</span>
+            <input
+              type="checkbox"
+              checked={perSide}
+              onChange={(e) => setPerSide(e.target.checked)}
+              className="w-6 h-6 accent-blue-600"
+            />
+          </label>
+        ) : (
+          <label className="flex items-center justify-between mt-5 py-2">
+            <span>
+              <span className="block text-lg font-medium">Track weight</span>
+              <span className="block text-sm text-slate-400">For weighted holds and loaded carries</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={trackWeight}
+              onChange={(e) => setTrackWeight(e.target.checked)}
+              className="w-6 h-6 accent-blue-600"
+            />
+          </label>
+        )}
 
         <div className="flex items-center justify-between mt-3">
           <div>
@@ -321,7 +345,7 @@ function EditSetsRepsSheet({ workout, slot, onClose }: { workout: Workout; slot:
         <button
           type="button"
           onClick={() => {
-            actions.editSetsReps(workout.id, slot.id, { sets, repsMin, repsMax, perSide, restSec })
+            actions.editSetsReps(workout.id, slot.id, { sets, repsMin, repsMax, perSide, restSec, trackWeight })
             onClose()
           }}
           className="mt-6 w-full bg-blue-600 text-white text-lg font-bold rounded-full py-4 active:bg-blue-700"

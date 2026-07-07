@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronsDown, ChevronsUp, Link2, Minus, Pause, Play, Plus, Timer, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronsDown, ChevronsUp, Link2, Minus, Pause, Play, Plus, Repeat, SlidersHorizontal, Timer, Trash2, X } from 'lucide-react'
 import Menu from '../components/Menu'
 import ExerciseImage from '../components/ExerciseImage'
 import ExerciseInfoSheet from '../components/ExerciseInfoSheet'
+import ExercisePicker from '../components/ExercisePicker'
 import EffortModal from '../components/EffortModal'
+import ScopeModal from '../components/ScopeModal'
 import Sheet from '../components/Sheet'
 import { getExercise } from '../data/catalog'
 import { actions, lastPerformance, logMode, useAppState } from '../lib/store'
@@ -36,6 +38,23 @@ interface Stopwatch {
   baseSec: number
 }
 
+interface ScopePrompt {
+  title: string
+  body: string
+  sessionLabel: string
+  futureLabel: string
+  danger?: boolean
+  apply: (alsoPlan: boolean) => void
+}
+
+interface TargetsPatch {
+  sets: number
+  repsMin: number
+  repsMax: number
+  perSide: boolean
+  trackWeight: boolean
+}
+
 export default function SessionView({ onDone }: { onDone: () => void }) {
   const state = useAppState()
   const session = state.activeSession
@@ -47,6 +66,9 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
   const [hint, setHint] = useState<{ title: string; body: string } | null>(null)
   const [restPicker, setRestPicker] = useState<number | null>(null) // logIndex
   const [watch, setWatch] = useState<Stopwatch | null>(null)
+  const [picker, setPicker] = useState<{ kind: 'add' } | { kind: 'swap'; logIndex: number } | null>(null)
+  const [editTargets, setEditTargets] = useState<number | null>(null) // logIndex
+  const [scope, setScope] = useState<ScopePrompt | null>(null)
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -151,11 +173,34 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
             onHint={setHint}
             onOpenRestPicker={() => setRestPicker(li)}
             onInfo={setInfoExercise}
+            onSwap={() => setPicker({ kind: 'swap', logIndex: li })}
+            onEditTargets={() => setEditTargets(li)}
+            onRemove={() => {
+              const name = getExercise(log.exerciseId)?.name ?? 'this exercise'
+              setScope({
+                title: `Remove ${name}?`,
+                body: 'Remove it from just this workout, or from future workouts as well?',
+                sessionLabel: 'Just this workout',
+                futureLabel: 'This + future workouts',
+                danger: true,
+                apply: (alsoPlan) => actions.sessionRemoveExercise(li, alsoPlan),
+              })
+            }}
           />
         ))}
       </div>
 
-      <div className="px-5 mt-8">
+      <div className="px-5 mt-6">
+        <button
+          type="button"
+          onClick={() => setPicker({ kind: 'add' })}
+          className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-2xl py-4 text-blue-600 font-semibold active:bg-slate-100"
+        >
+          <Plus size={18} /> Add exercise
+        </button>
+      </div>
+
+      <div className="px-5 mt-4">
         <button
           type="button"
           onClick={finish}
@@ -209,7 +254,161 @@ export default function SessionView({ onDone }: { onDone: () => void }) {
           }}
         />
       )}
+
+      {picker && (
+        <ExercisePicker
+          title={picker.kind === 'swap' ? 'Swap Exercise' : 'Add Exercise'}
+          onClose={() => setPicker(null)}
+          onInfo={setInfoExercise}
+          onSelect={(ex) => {
+            const p = picker
+            setPicker(null)
+            if (p.kind === 'add') {
+              setScope({
+                title: `Add ${ex.name}?`,
+                body: 'Add it to just this workout, or to your plan going forward?',
+                sessionLabel: 'Just this workout',
+                futureLabel: 'This + future workouts',
+                apply: (alsoPlan) => actions.sessionAddExercise(ex.id, alsoPlan),
+              })
+            } else {
+              const oldName = getExercise(session.logs[p.logIndex]?.exerciseId ?? '')?.name ?? 'the current exercise'
+              setScope({
+                title: `Swap to ${ex.name}?`,
+                body: `Replaces ${oldName}. Any completed sets for it in this session are cleared. Swap just this workout, or future ones too?`,
+                sessionLabel: 'Just this workout',
+                futureLabel: 'This + future workouts',
+                apply: (alsoPlan) => actions.sessionSwapExercise(p.logIndex, ex.id, alsoPlan),
+              })
+            }
+          }}
+        />
+      )}
+
+      {editTargets !== null && session.logs[editTargets] && (
+        <SessionEditSheet
+          log={session.logs[editTargets]}
+          onClose={() => setEditTargets(null)}
+          onSave={(patch) => {
+            const li = editTargets
+            setEditTargets(null)
+            setScope({
+              title: 'Save changes?',
+              body: 'Apply the new sets/reps to just this workout, or to future workouts as well?',
+              sessionLabel: 'Just this workout',
+              futureLabel: 'This + future workouts',
+              apply: (alsoPlan) => actions.sessionEditTargets(li, patch, alsoPlan),
+            })
+          }}
+        />
+      )}
+
+      {scope && (
+        <ScopeModal
+          title={scope.title}
+          body={scope.body}
+          sessionLabel={scope.sessionLabel}
+          futureLabel={scope.futureLabel}
+          danger={scope.danger}
+          onClose={() => setScope(null)}
+          onPick={(choice) => {
+            scope.apply(choice === 'future')
+            setScope(null)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+// ---------- in-session targets editor ----------
+
+function SessionEditSheet({
+  log,
+  onSave,
+  onClose,
+}: {
+  log: ExerciseLog
+  onSave: (patch: TargetsPatch) => void
+  onClose: () => void
+}) {
+  const [sets, setSets] = useState(log.sets.length)
+  const [repsMin, setRepsMin] = useState(log.repsMin)
+  const [repsMax, setRepsMax] = useState(log.repsMax)
+  const [perSide, setPerSide] = useState(log.perSide)
+  const [trackWeight, setTrackWeight] = useState(log.trackWeight ?? false)
+  const ex = getExercise(log.exerciseId)
+  const timed = logMode(log.exerciseId) === 'time'
+
+  const stepper = (label: string, value: number, min: number, max: number, onChange: (v: number) => void) => (
+    <div className="flex items-center justify-between mt-5">
+      <span className="text-lg font-medium">{label}</span>
+      <div className="flex items-center gap-4">
+        <button
+          type="button"
+          aria-label={`Decrease ${label}`}
+          onClick={() => onChange(Math.max(min, value - 1))}
+          className="w-11 h-11 rounded-full bg-slate-100 text-2xl font-bold active:bg-slate-200"
+        >
+          −
+        </button>
+        <span className="text-2xl font-bold w-10 text-center">{value}</span>
+        <button
+          type="button"
+          aria-label={`Increase ${label}`}
+          onClick={() => onChange(Math.min(max, value + 1))}
+          className="w-11 h-11 rounded-full bg-slate-100 text-2xl font-bold active:bg-slate-200"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  )
+
+  return (
+    <Sheet onClose={onClose}>
+      <div className="px-5 pb-8">
+        <h2 className="text-2xl font-bold">{timed ? 'Edit Sets' : 'Edit Sets & Reps'}</h2>
+        <p className="text-slate-400 mt-1">{ex?.name}</p>
+
+        {stepper('Sets', sets, 1, 10, setSets)}
+        {!timed && (
+          <>
+            {stepper('Min reps', repsMin, 1, 100, (v) => {
+              setRepsMin(v)
+              if (v > repsMax) setRepsMax(v)
+            })}
+            {stepper('Max reps', repsMax, repsMin, 100, setRepsMax)}
+            <label className="flex items-center justify-between mt-5 py-2">
+              <span className="text-lg font-medium">Per side (unilateral)</span>
+              <input type="checkbox" checked={perSide} onChange={(e) => setPerSide(e.target.checked)} className="w-6 h-6 accent-blue-600" />
+            </label>
+          </>
+        )}
+        {timed && (
+          <label className="flex items-center justify-between mt-5 py-2">
+            <span>
+              <span className="block text-lg font-medium">Track weight</span>
+              <span className="block text-sm text-slate-400">For weighted holds and loaded carries</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={trackWeight}
+              onChange={(e) => setTrackWeight(e.target.checked)}
+              className="w-6 h-6 accent-blue-600"
+            />
+          </label>
+        )}
+
+        <button
+          type="button"
+          onClick={() => onSave({ sets, repsMin, repsMax, perSide, trackWeight })}
+          className="mt-6 w-full bg-blue-600 text-white text-lg font-bold rounded-full py-4 active:bg-blue-700"
+        >
+          Save
+        </button>
+      </div>
+    </Sheet>
   )
 }
 
@@ -227,6 +426,9 @@ function ExerciseCard({
   onHint,
   onOpenRestPicker,
   onInfo,
+  onSwap,
+  onEditTargets,
+  onRemove,
 }: {
   log: ExerciseLog
   logIndex: number
@@ -239,6 +441,9 @@ function ExerciseCard({
   onHint: (hint: { title: string; body: string }) => void
   onOpenRestPicker: () => void
   onInfo: (ex: CatalogExercise) => void
+  onSwap: () => void
+  onEditTargets: () => void
+  onRemove: () => void
 }) {
   const state = useAppState()
   const [collapsed, setCollapsed] = useState(false)
@@ -275,6 +480,13 @@ function ExerciseCard({
             </p>
           )}
         </div>
+        <Menu
+          items={[
+            { label: 'Swap', icon: <Repeat size={18} />, onClick: onSwap },
+            { label: 'Edit Sets & Reps', icon: <SlidersHorizontal size={18} />, onClick: onEditTargets },
+            { label: 'Remove', icon: <Trash2 size={18} />, danger: true, onClick: onRemove },
+          ]}
+        />
         <button
           type="button"
           aria-label={collapsed ? 'Expand' : 'Collapse'}
@@ -289,13 +501,24 @@ function ExerciseCard({
         <>
           <div
             className={`mt-3 grid gap-x-2 gap-y-2 items-center text-center ${
-              mode === 'time' ? 'grid-cols-[1.8rem_1fr_2.5rem_1fr_2.75rem]' : 'grid-cols-[1.8rem_1fr_1.15fr_1.15fr_2.75rem]'
+              mode === 'time'
+                ? log.trackWeight
+                  ? 'grid-cols-[1.8rem_0.9fr_1fr_1.4fr_2.75rem]'
+                  : 'grid-cols-[1.8rem_1fr_2.5rem_1fr_2.75rem]'
+                : 'grid-cols-[1.8rem_1fr_1.15fr_1.15fr_2.75rem]'
             }`}
           >
             <span className="text-xs font-bold text-slate-400">SET</span>
             <span className="text-xs font-bold text-slate-400">PREVIOUS</span>
             {mode === 'time' ? (
-              <span className="text-xs font-bold text-slate-400 col-span-2">TIME</span>
+              log.trackWeight ? (
+                <>
+                  <span className="text-xs font-bold text-slate-400">{unit.toUpperCase()}</span>
+                  <span className="text-xs font-bold text-slate-400">TIME</span>
+                </>
+              ) : (
+                <span className="text-xs font-bold text-slate-400 col-span-2">TIME</span>
+              )
             ) : (
               <>
                 <span className="text-xs font-bold text-slate-400">
@@ -313,6 +536,7 @@ function ExerciseCard({
                 index={si}
                 logIndex={logIndex}
                 mode={mode}
+                trackWeight={log.trackWeight ?? false}
                 suggestion={suggestions[si] ?? null}
                 watch={watch && watch.logIndex === logIndex && watch.setIndex === si ? watch : null}
                 now={now}
@@ -362,6 +586,7 @@ function SetRow({
   index,
   logIndex,
   mode,
+  trackWeight,
   suggestion,
   watch,
   now,
@@ -373,6 +598,7 @@ function SetRow({
   index: number
   logIndex: number
   mode: 'weight-reps' | 'reps' | 'time'
+  trackWeight: boolean
   suggestion: SetSuggestion | null
   watch: Stopwatch | null
   now: number
@@ -386,7 +612,7 @@ function SetRow({
       ? '–'
       : mode === 'time'
         ? prev.timeSec != null
-          ? fmtClock(prev.timeSec)
+          ? `${trackWeight && prev.weight != null ? `${prev.weight} × ` : ''}${fmtClock(prev.timeSec)}`
           : '–'
         : mode === 'weight-reps'
           ? prev.weight != null || prev.reps != null
@@ -438,30 +664,48 @@ function SetRow({
 
       {mode === 'time' ? (
         <>
-          <button
-            type="button"
-            aria-label={running ? 'Stop timer' : 'Start timer'}
-            onClick={onToggleWatch}
-            className={`w-9 h-9 mx-auto rounded-full flex items-center justify-center ${
-              running ? 'bg-blue-600 text-white' : 'text-blue-600 border-2 border-blue-500'
-            }`}
-          >
-            {running ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
-          </button>
-          <input
-            type="text"
-            inputMode="numeric"
-            placeholder="0:00"
-            value={displaySec != null ? fmtClock(displaySec) : ''}
-            onChange={(e) => {
-              const parts = e.target.value.split(':').map((x) => Number(x))
-              const sec = parts.length === 2 ? parts[0] * 60 + (parts[1] || 0) : Number(e.target.value) || 0
-              actions.updateSet(logIndex, index, { timeSec: Number.isFinite(sec) ? sec : null })
-            }}
-            className={`w-full min-w-0 text-center text-lg font-semibold rounded-xl py-2 outline-none focus:ring-2 focus:ring-blue-400 tabular-nums ${
-              running ? 'bg-blue-50 text-blue-700' : set.done ? 'bg-green-100/60' : 'bg-slate-100'
-            }`}
-          />
+          {trackWeight ? (
+            numInput('weight', null)
+          ) : (
+            <button
+              type="button"
+              aria-label={running ? 'Stop timer' : 'Start timer'}
+              onClick={onToggleWatch}
+              className={`w-9 h-9 mx-auto rounded-full flex items-center justify-center ${
+                running ? 'bg-blue-600 text-white' : 'text-blue-600 border-2 border-blue-500'
+              }`}
+            >
+              {running ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
+            </button>
+          )}
+          <div className="flex items-center gap-1 min-w-0">
+            {trackWeight && (
+              <button
+                type="button"
+                aria-label={running ? 'Stop timer' : 'Start timer'}
+                onClick={onToggleWatch}
+                className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center ${
+                  running ? 'bg-blue-600 text-white' : 'text-blue-600 border-2 border-blue-500'
+                }`}
+              >
+                {running ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" className="ml-0.5" />}
+              </button>
+            )}
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="0:00"
+              value={displaySec != null ? fmtClock(displaySec) : ''}
+              onChange={(e) => {
+                const parts = e.target.value.split(':').map((x) => Number(x))
+                const sec = parts.length === 2 ? parts[0] * 60 + (parts[1] || 0) : Number(e.target.value) || 0
+                actions.updateSet(logIndex, index, { timeSec: Number.isFinite(sec) ? sec : null })
+              }}
+              className={`w-full min-w-0 text-center text-lg font-semibold rounded-xl py-2 outline-none focus:ring-2 focus:ring-blue-400 tabular-nums ${
+                running ? 'bg-blue-50 text-blue-700' : set.done ? 'bg-green-100/60' : 'bg-slate-100'
+              }`}
+            />
+          </div>
         </>
       ) : (
         <>
